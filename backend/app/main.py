@@ -1,5 +1,5 @@
 """
-BSBL-Scout API — stateless pitching analytics.
+PRISM API — stateless pitching analytics.
 
 Open-source and database-free by design: upload a Rapsodo pitching CSV, get the
 full dashboard report back in one response. Nothing is stored server-side.
@@ -11,7 +11,7 @@ from app.api import routes_analyze
 from app.core.config import settings
 
 app = FastAPI(
-    title="BSBL-Scout API",
+    title="PRISM API",
     description="Stateless pitching analytics for Rapsodo CSV exports.",
     version="1.0.0",
     # Docs can be hidden in a locked deployment (defaults on for open source).

@@ -1,51 +1,64 @@
-# BSBL-Scout
+# PRISM
 
-BSBL-Scout is an open-source pitching-analytics app for players of all ages,
-sizes, and styles. Drop in a Rapsodo pitching CSV and it builds a full set of
-development dashboards — movement, velocity, release, command, and spin — so
-players can see strengths and weaknesses instead of guessing.
+**Pitch Rating and Integrated Stuff Model**
 
-## How it works
+PRISM is a pitching analytics and pitch grading system built for Oberlin College
+Baseball. It turns pitch-tracking data into grades and explanations that coaches
+and pitchers can act on: what each pitch does well, what is holding it back, and
+what to work on next.
 
-BSBL-Scout is **stateless — there is no database**. You upload a CSV, the API
-validates it, analyses it entirely in memory, and returns one complete report
-that the frontend renders. Nothing is stored on the server. Close the tab and
-the data is gone.
+## Status
 
-```
-CSV upload ──▶ POST /analyze ──▶ validate schema ──▶ pandas analysis ──▶ JSON report ──▶ dashboards
-```
+PRISM is in active development, built on top of an existing pitching-dashboard
+app (see [Credits](#credits)).
 
-## The dashboards
+**Working today:** upload a Rapsodo pitching CSV and get a full set of
+development dashboards for movement, velocity, release, command, and spin.
+
+**In progress:**
+
+- TrackMan as the native data format, with adapters that convert other sources
+  (MLB Statcast for training, Rapsodo as an interim bullpen source)
+- Shape-based pitch classification, independent of device pitch tags
+- **Stuff+** and **Shape+** grades from gradient-boosted models, scaled to the
+  Oberlin staff and to Division III
+- Plain-English explanations of what is driving each grade
+- **Pitch+**, blending stuff, location, and game results
+- Saved sessions, pitcher pages, and season trends
+
+## Current dashboards
 
 | Panel | What it shows |
 |-------|---------------|
 | **KPI row** | Tracked pitches, strike %, peak & average velocity, arsenal size, spin efficiency |
 | **Arsenal table** | Per-pitch-type profile: usage, velo, spin, spin-eff, break, strike % |
 | **Movement profile** | Horizontal vs vertical break, with each pitch's average shape |
-| **Velocity trend** | Velocity across the session by pitch order — consistency & fatigue |
-| **Release point** | Release side vs height — delivery repeatability & tunneling |
-| **Plate location** | Where pitches crossed the plate, coloured by strike/ball — command |
+| **Velocity trend** | Velocity across the session by pitch order (consistency & fatigue) |
+| **Release point** | Release side vs height (delivery repeatability & tunneling) |
+| **Plate location** | Where pitches crossed the plate, coloured by strike/ball (command) |
 | **Command / Spin bars** | Strike rate and spin efficiency ranked by pitch type |
 
-Chart colours come from a colorblind-safe categorical palette; each pitch type
-is pinned to a fixed colour so it reads the same across every panel.
+## Current input format
 
-## The input schema
-
-Uploads must be a Rapsodo pitching export: two metadata lines
+Uploads are currently Rapsodo pitching exports: two metadata lines
 (`"Player ID:"`, `"Player Name:"`), a blank line, then the pitch header row and
-rows. Files that don't match are rejected with a clear error. The exact required
-columns are served live at `GET /analyze/schema`, and a working example lives at
+rows. The required columns are served live at `GET /analyze/schema`, and a
+working example lives at
 [frontend/public/sample-pitch-data.csv](frontend/public/sample-pitch-data.csv).
+TrackMan support is the next major change.
+
+## Data policy
+
+This repository is public. **No raw pitch data, player data, or licensed data
+(Synergy, TrackMan, Rapsodo exports) is ever committed.** Keep data in the
+git-ignored `data/` folder and API keys in a local `.env` file (see
+[`backend/.env.example`](backend/.env.example)).
 
 ## Run with Docker (recommended)
 
-No `.env` and no database are needed.
-
 ```bash
-git clone https://github.com/yandersonpark1/BSBL-Scout
-cd BSBL-Scout
+git clone https://github.com/AE1324/bsbl-scout
+cd bsbl-scout
 docker compose up --build
 ```
 
@@ -116,6 +129,13 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, cod
 conventions, and the one rule that keeps the two halves in sync (the report
 contract).
 
+## Credits
+
+- PRISM began as a fork of [BSBL-Scout](https://github.com/yandersonpark1/BSBL-Scout)
+  by yandersonpark1, which provided the original upload pipeline and dashboards.
+- The grading methodology draws on the publicly shared write-up of Swarthmore
+  College Baseball's Garnet Pitch Lab.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The original BSBL-Scout copyright notice is retained.

@@ -8,13 +8,13 @@ export default function Footer() {
               <circle cx="12" cy="12" r="9" stroke="var(--color-lime-ink)" strokeWidth="2" />
             </svg>
           </span>
-          <span className="font-display text-xl leading-none text-ink">Kineo</span>
+          <span className="font-display text-xl leading-none text-ink">PRISM</span>
           <span className="text-[13px] text-ink-soft">· MIT licensed</span>
         </div>
 
         <nav className="flex items-center gap-6">
           <a
-            href="https://github.com/yandersonpark1/BSBL-Scout"
+            href="https://github.com/AE1324/bsbl-scout"
             target="_blank"
             rel="noreferrer"
             className="inline-flex cursor-pointer select-none items-center gap-2 text-[13px] font-medium text-ink-soft transition-colors hover:text-ink"

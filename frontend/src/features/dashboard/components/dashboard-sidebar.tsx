@@ -154,7 +154,7 @@ export function DashboardSidebar({
     >
       {/* Brand + collapse */}
       <div className="flex h-16 items-center gap-2.5 px-4">
-        <Link to="/" className="flex shrink-0 items-center gap-2.5" aria-label="Kineo home">
+        <Link to="/" className="flex shrink-0 items-center gap-2.5" aria-label="PRISM home">
           <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-lime">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
               <circle cx="12" cy="12" r="9" stroke="var(--color-lime-ink)" strokeWidth="2" />
@@ -168,7 +168,7 @@ export function DashboardSidebar({
           </span>
           {!collapsed && (
             <span className="font-display text-2xl leading-none tracking-tight text-ink">
-              Kineo
+              PRISM
             </span>
           )}
         </Link>
@@ -259,7 +259,7 @@ export function DashboardSidebar({
         }`}
       >
         <a
-          href="https://github.com/yandersonpark1/BSBL-Scout"
+          href="https://github.com/AE1324/bsbl-scout"
           target="_blank"
           rel="noreferrer"
           title="GitHub"

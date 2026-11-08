@@ -74,7 +74,7 @@ export default function Navbar() {
             </svg>
           </span>
           <span className="font-display text-3xl leading-none tracking-tight text-ink">
-            Kineo
+            PRISM
           </span>
         </Link>
 
@@ -96,7 +96,7 @@ export default function Navbar() {
         <div className="flex items-center gap-4">
           <ThemeToggle />
           <a
-            href="https://github.com/yandersonpark1/BSBL-Scout"
+            href="https://github.com/AE1324/bsbl-scout"
             target="_blank"
             rel="noreferrer"
             className="inline-flex cursor-pointer select-none items-center gap-2 rounded-full border border-line bg-surface px-4 py-1.5 text-[13px] font-medium text-ink shadow-sm transition-colors hover:border-lime/50 hover:text-ink"

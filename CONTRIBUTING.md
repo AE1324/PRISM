@@ -1,15 +1,16 @@
-# Contributing to BSBL-Scout
+# Contributing to PRISM
 
-Thanks for your interest in contributing! BSBL-Scout is an open-source pitching
-analytics app. This guide covers how to get set up and the conventions that keep
+Thanks for your interest in contributing! PRISM is an open-source pitching
+analytics and pitch grading system. This guide covers how to get set up and the conventions that keep
 the codebase coherent.
 
 ## Getting started
 
 1. **Fork** the repo and clone your fork.
-2. Create a branch: `git checkout -b my-feature`.
-3. Get it running — see below.
-4. Make your change, verify it, and open a pull request against `main`.
+2. Never commit raw pitch data, player data, or API keys (see the README's Data policy).
+3. Create a branch: `git checkout -b my-feature`.
+4. Get it running — see below.
+5. Make your change, verify it, and open a pull request against `main`.
 
 ## Running the app
 

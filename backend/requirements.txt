@@ -1,4 +1,4 @@
-# BSBL-Scout backend — stateless pitching analytics (no database).
+# PRISM backend — stateless pitching analytics (no database).
 # Web framework + ASGI server
 fastapi==0.117.1
 uvicorn==0.37.0

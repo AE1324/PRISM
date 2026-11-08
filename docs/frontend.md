@@ -1,4 +1,4 @@
-# Frontend design — BSBL-Scout dashboard app
+# Frontend design — PRISM dashboard app
 
 A React + TypeScript single-page app built with Vite. It presents a landing /
 upload experience, sends the CSV to the backend, and renders the returned
@@ -106,7 +106,7 @@ policy mirrors the backend's philosophy:
 
 ### `features/analysis/report-storage.ts` — client-only cache
 
-The report is stashed in `sessionStorage` under `bsbl:last-report` so a refresh
+The report is stashed in `sessionStorage` under `prism:last-report` so a refresh
 on `/dashboard` doesn't lose it. It is **cleared when the tab closes** — nothing
 is persisted long-term, matching the backend's stateless promise. All access is
 wrapped in try/catch (private mode / quota can make storage unavailable).

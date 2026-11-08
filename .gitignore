@@ -34,4 +34,11 @@ Oberlin_staff/
 # Workspace
 .claude/
 CLAUDE.md
-BSBL-Scout.code-workspace
+*.code-workspace
+# ── Data, models and secrets (never commit) ────────────────────────
+data/
+*.parquet
+*.feather
+models/*.pkl
+models/*.joblib
+.ipynb_checkpoints/

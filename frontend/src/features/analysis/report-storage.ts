@@ -5,7 +5,7 @@ import type { PitchingReport } from "@/lib/report";
  * most recent one in sessionStorage so a page refresh on /dashboard doesn't lose
  * it. Cleared when the tab closes — nothing is persisted long-term.
  */
-const KEY = "bsbl:last-report";
+const KEY = "prism:last-report";
 
 export function saveReport(report: PitchingReport): void {
   try {

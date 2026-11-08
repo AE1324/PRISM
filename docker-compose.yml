@@ -1,4 +1,4 @@
-# BSBL-Scout — runs fully in-memory, no database service required.
+# PRISM — runs fully in-memory, no database service required.
 #
 # Dev-oriented compose: both services run their live-reload dev servers with the
 # source bind-mounted, so edits on the host reload inside the container.
@@ -11,7 +11,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bsbl-backend
+    container_name: prism-backend
     ports:
       - "8000:8000"
     volumes:
@@ -33,7 +33,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: bsbl-frontend
+    container_name: prism-frontend
     ports:
       - "5173:5173"
     volumes:

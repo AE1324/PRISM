@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
-  Kineo design system — "Night Turf"
+  PRISM design system — "Night Turf"
   A dark, local-first analytics aesthetic: near-black green-cast ground,
   slightly raised charcoal panels, off-white ink, and a single loud
   chartreuse-lime accent used for actions and punctuation. A blue is
@@ -36,7 +36,7 @@
   --color-line-strong: rgba(242, 245, 233, 0.17); /* baselines, emphasised rules */
 
   /* Accents */
-  --color-lime: #c9f24d;        /* the Kineo chartreuse — fills, buttons, chips */
+  --color-lime: #c9f24d;        /* the PRISM chartreuse — fills, buttons, chips */
   --color-lime-bright: #dafb72; /* hover state for lime fills */
   --color-lime-ink: #161a06;    /* text set ON a lime fill */
   --color-lime-wash: rgba(201, 242, 77, 0.1); /* faint lime tint */

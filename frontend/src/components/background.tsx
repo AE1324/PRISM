@@ -1,7 +1,7 @@
 import React from "react";
 
 /**
- * Ambient page atmosphere for Kineo — "Night Turf" scheme.
+ * Ambient page atmosphere for PRISM — "Night Turf" scheme.
  * A near-black green-cast ground, a faint dotted grid that fades toward the
  * edges, and two slow-drifting glows (lime + blue) that give the page depth
  * without competing with content. All colours are theme tokens, so this same

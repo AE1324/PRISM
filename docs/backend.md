@@ -1,4 +1,4 @@
-# Backend design — BSBL-Scout API
+# Backend design — PRISM API
 
 A single-purpose, **stateless** FastAPI service: it accepts one Rapsodo pitching
 CSV, validates it, analyses it in memory with pandas, and returns one complete

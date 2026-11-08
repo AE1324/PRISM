@@ -1,5 +1,5 @@
 """
-Runtime configuration for the BSBL-Scout backend.
+Runtime configuration for the PRISM backend.
 
 The service is intentionally stateless and database-free: a CSV is uploaded,
 analysed in-memory, and the full report is returned in one response. Everything

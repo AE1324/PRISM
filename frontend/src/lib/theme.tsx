@@ -8,7 +8,7 @@ import {
 } from "react";
 
 /**
- * Two-theme system. Dark is the default Kineo look; "light" flips the CSS
+ * Two-theme system. Dark is the default PRISM look; "light" flips the CSS
  * tokens (see index.css). The <html> class is set before first paint by the
  * inline script in index.html — this provider just keeps React state, the
  * class, and localStorage in sync, and re-renders the tree on toggle so

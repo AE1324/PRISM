@@ -1,6 +1,6 @@
-# BSBL-Scout — Design Documentation
+# PRISM — Design Documentation
 
-This folder documents *how* BSBL-Scout is built, for contributors. For how to
+This folder documents *how* PRISM is built, for contributors. For how to
 **run** it, see the top-level [README](../README.md).
 
 - **[backend.md](backend.md)** — the FastAPI analysis service (stateless, no DB).
@@ -8,7 +8,7 @@ This folder documents *how* BSBL-Scout is built, for contributors. For how to
 
 ## System at a glance
 
-BSBL-Scout turns a single Rapsodo pitching CSV into a set of development
+PRISM turns a single Rapsodo pitching CSV into a set of development
 dashboards. It is deliberately **stateless**: there is no database, no user
 accounts, and nothing is written to disk on the server. One upload produces one
 self-contained report, which the browser renders and keeps in memory.

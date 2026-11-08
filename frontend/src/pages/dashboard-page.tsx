@@ -73,7 +73,7 @@ export default function DashboardPage() {
                 <circle cx="12" cy="12" r="9" stroke="var(--color-lime-ink)" strokeWidth="2" />
               </svg>
             </span>
-            <span className="font-display text-xl leading-none text-ink">Kineo</span>
+            <span className="font-display text-xl leading-none text-ink">PRISM</span>
           </Link>
           <span className="hidden text-sm font-medium text-ink-soft lg:block">
             Dashboard
