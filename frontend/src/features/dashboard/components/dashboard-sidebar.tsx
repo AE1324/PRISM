@@ -259,7 +259,7 @@ export function DashboardSidebar({
         }`}
       >
         <a
-          href="https://github.com/AE1324/bsbl-scout"
+          href="https://github.com/AE1324/PRISM"
           target="_blank"
           rel="noreferrer"
           title="GitHub"

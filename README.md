@@ -57,8 +57,8 @@ git-ignored `data/` folder and API keys in a local `.env` file (see
 ## Run with Docker (recommended)
 
 ```bash
-git clone https://github.com/AE1324/bsbl-scout
-cd bsbl-scout
+git clone https://github.com/AE1324/PRISM
+cd PRISM
 docker compose up --build
 ```
 

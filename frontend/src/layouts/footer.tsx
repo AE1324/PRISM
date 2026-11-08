@@ -14,7 +14,7 @@ export default function Footer() {
 
         <nav className="flex items-center gap-6">
           <a
-            href="https://github.com/AE1324/bsbl-scout"
+            href="https://github.com/AE1324/PRISM"
             target="_blank"
             rel="noreferrer"
             className="inline-flex cursor-pointer select-none items-center gap-2 text-[13px] font-medium text-ink-soft transition-colors hover:text-ink"
