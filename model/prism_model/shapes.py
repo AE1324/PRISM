@@ -6,8 +6,12 @@ and speed relative to the pitcher's own primary fastball, so the same rules
 work for an MLB arm and a Division III arm. Three levels:
 
   Bucket     Fastball | Breaking | Offspeed   (Stuff+ compares within a bucket)
-  Pitch type Four-seam, Sinker, Cutter | Slider, Curveball | Changeup
-  Subtype    e.g. Riding four-seam, Sweeper, 12-6 curveball, Splitter
+  Pitch type Four-seam, Sinker, Cutter | Slider, Curveball | Changeup, Splitter, Knuckleball
+  Subtype    e.g. Ride four-seam, Sweeper, 12-6 curveball, Fade changeup
+
+Subtypes are descriptive tags only. They never change a grade: a pitch is
+graded on how well it works within its bucket, not on whether it fits the
+usual shape for its name.
 
 How it works
 ------------
@@ -40,24 +44,25 @@ ARTIFACT_DIR = DATA_DIR / "models"
 CLASSIFIER_PATH = ARTIFACT_DIR / "shape_classifier.joblib"
 REPORT_PATH = ARTIFACT_DIR / "shape_classifier_report.json"
 
-# Statcast pitch-type codes -> PRISM pitch type. Sweepers and slurves are
-# slider subtypes; splitters and forkballs are changeup subtypes. Unlisted codes
-# (knuckleball, eephus, pitchout, unknown) are left out of training.
+# Statcast pitch-type codes -> PRISM pitch type. Sweepers are slider subtypes;
+# slurves are curveball subtypes; two-seamers are sinkers. Knuckleballs are
+# assigned by a spin rule rather than learned. Unlisted codes (eephus,
+# pitchout, unknown) are left out of training.
 FAMILY = {
     "FF": "Four-seam",
     "SI": "Sinker",
     "FC": "Cutter",
     "SL": "Slider",
     "ST": "Slider",
-    "SV": "Slider",
+    "SV": "Curveball",
     "CU": "Curveball",
     "KC": "Curveball",
     "CS": "Curveball",
     "CH": "Changeup",
-    "FS": "Changeup",
-    "FO": "Changeup",
+    "FS": "Splitter",
+    "FO": "Splitter",
 }
-FAMILIES = ["Four-seam", "Sinker", "Cutter", "Slider", "Curveball", "Changeup"]
+FAMILIES = ["Four-seam", "Sinker", "Cutter", "Slider", "Curveball", "Changeup", "Splitter"]
 
 BUCKET = {
     "Four-seam": "Fastball",
@@ -66,40 +71,43 @@ BUCKET = {
     "Slider": "Breaking",
     "Curveball": "Breaking",
     "Changeup": "Offspeed",
+    "Splitter": "Offspeed",
+    "Knuckleball": "Offspeed",
 }
 
-# Subtype thresholds, applied to a pitcher's median shape for each pitch type.
+# A pitch with less total spin than this is a knuckleball, whatever its shape.
+KNUCKLEBALL_MAX_RPM = 400
+
+
+def is_slurve(m: dict) -> bool:
+    """Roughly equal sweep and drop: its own shape, filed under curveballs."""
+    return m["glove"] >= 6 and m["ivb"] <= -4 and m["glove"] >= -m["ivb"] * 0.6
+
+
+# Subtype tags, applied to a pitcher's median shape for each pitch type.
 # Movement in inches; "glove" is glove-side break (positive = toward the glove
-# side). Rules are checked in order and the first match wins; the last entry
-# for each pitch type is the default. These are starting points to tune.
+# side). Rules are checked in order and the first match wins; the last entry is
+# the default. Pitch types not listed here get no subtype. Starting points to
+# tune by eye on real staffs.
 SUBTYPE_RULES = {
     "Four-seam": [
-        ("Riding", lambda m: m["ivb"] >= 18),
-        ("Flat", lambda m: m["ivb"] < 14),
-        ("Standard", lambda m: True),
-    ],
-    "Sinker": [
-        ("Two-seam", lambda m: m["ivb"] >= 10),
-        ("Sinker", lambda m: True),
-    ],
-    "Cutter": [
-        ("Hard cutter", lambda m: m["ivb"] >= 8),
-        ("Short cutter", lambda m: True),
+        ("Ride", lambda m: m["ivb"] >= 14),
+        ("Flat", lambda m: True),
     ],
     "Slider": [
         ("Sweeper", lambda m: m["glove"] >= 10 and m["ivb"] > -4),
-        ("Slurve", lambda m: m["glove"] >= 6 and m["ivb"] <= -4),
-        ("Gyro", lambda m: True),
-    ],
-    "Curveball": [
-        ("12-6", lambda m: m["glove"] < 5),
-        ("Slurve", lambda m: m["glove"] >= -m["ivb"]),
+        ("Gyro", lambda m: m["glove"] < 5),
         ("Traditional", lambda m: True),
     ],
-    "Changeup": [
-        ("Splitter", lambda m: m["spin_ratio"] < 0.65),
-        ("Fading", lambda m: m["hb_diff"] >= 4),
+    "Curveball": [
+        ("Slurve", is_slurve),
+        ("12-6", lambda m: m["glove"] < 5),
         ("Standard", lambda m: True),
+    ],
+    "Changeup": [
+        # More arm-side run than the fastball vs. spin killed mainly for drop.
+        ("Fade", lambda m: m["hb_diff"] >= 4),
+        ("Drop", lambda m: True),
     ],
 }
 
@@ -257,16 +265,20 @@ def assign_subtypes(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFra
     feats = shape_features(df)
     work = pd.concat([df[by], feats], axis=1).dropna(subset=["shape_family"])
     med = work.groupby(by)[["InducedVertBreak", "hb_arm", "hb_diff", "spin_ratio"]].median().reset_index()
-    med["subtype"] = [
-        subtype_for(row.shape_family, {
-            "ivb": row.InducedVertBreak,
-            "glove": -row.hb_arm,
-            "hb_diff": row.hb_diff,
-            "spin_ratio": row.spin_ratio,
-        })
-        for row in med.itertuples()
+    shapes = [
+        {"ivb": r.InducedVertBreak, "glove": -r.hb_arm, "hb_diff": r.hb_diff, "spin_ratio": r.spin_ratio}
+        for r in med.itertuples()
     ]
-    return df.merge(med[by + ["subtype"]], on=by, how="left")
+    # A slurve-shaped "slider" is filed as a curveball, so every slurve shares one tag.
+    med["new_family"] = [
+        "Curveball" if fam == "Slider" and not any(pd.isna(v) for v in m.values()) and is_slurve(m) else fam
+        for fam, m in zip(med["shape_family"], shapes)
+    ]
+    med["subtype"] = [subtype_for(fam, m) for fam, m in zip(med["new_family"], shapes)]
+    df = df.merge(med[by + ["new_family", "subtype"]], on=by, how="left")
+    df["shape_family"] = df["new_family"].where(df["new_family"].notna(), df["shape_family"])
+    df["bucket"] = df["shape_family"].map(BUCKET)
+    return df.drop(columns="new_family")
 
 
 def classify(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
@@ -283,6 +295,8 @@ def classify(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
         proba = clf.predict_proba(feats[ok])
         df.loc[ok, "shape_family"] = clf.classes_[proba.argmax(axis=1)]
         df.loc[ok, "shape_conf"] = proba.max(axis=1)
+    knuckle = df["SpinRate"] < KNUCKLEBALL_MAX_RPM
+    df.loc[knuckle, "shape_family"] = "Knuckleball"
     df["bucket"] = df["shape_family"].map(BUCKET)
     return assign_subtypes(df, by=by)
 
@@ -295,7 +309,11 @@ def print_subtype_summary(df: pd.DataFrame) -> None:
     print(share.to_string())
     print("\nMLB tag vs PRISM subtype (row share):")
     cross = pd.crosstab(pitched["TaggedPitchType"], pitched["subtype"], normalize="index").round(2)
-    print(cross.loc[[t for t in ["FF", "SI", "FC", "SL", "ST", "SV", "CU", "KC", "CH", "FS"] if t in cross.index]].to_string())
+    print(cross.loc[[t for t in ["FF", "SI", "FC", "SL", "ST", "SV", "CU", "KC", "CH", "FS", "KN"] if t in cross.index]].to_string())
+    print("\nPitch type share by MLB tag (row share):")
+    typed = df.dropna(subset=["shape_family"])
+    cross2 = pd.crosstab(typed["TaggedPitchType"], typed["shape_family"], normalize="index").round(2)
+    print(cross2.loc[[t for t in ["FF", "SI", "FC", "SL", "ST", "SV", "CU", "KC", "CH", "FS", "KN"] if t in cross2.index]].to_string())
 
 
 def print_report(report: dict) -> None:
