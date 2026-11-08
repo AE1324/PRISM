@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 from prism_data.paths import RAW_DIR
 
 BASE_URL = "https://d3-dashboard.com/api"
+DIVISION = "ncaa_3"
 OUT_DIR = RAW_DIR / "d3dashboard"
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
@@ -51,6 +52,8 @@ class D3Dashboard:
                 reset = float(resp.headers.get("X-RateLimit-Reset", time.time() + 10))
                 time.sleep(max(1.0, reset - time.time()))
                 continue
+            if resp.status_code == 400:
+                raise SystemExit(f"D3 Dashboard rejected the request to /{endpoint}: {resp.text[:200]}")
             if resp.status_code in (401, 403):
                 raise SystemExit("D3 Dashboard rejected the API key. It may have expired; create a new one.")
             if resp.status_code >= 500 and attempt < 3:
@@ -75,15 +78,15 @@ def main() -> None:
     args = parser.parse_args()
 
     api = D3Dashboard()
-    # The API's endpoints spell the division two ways: 3 or "ncaa_3".
+    # Every endpoint expects the division as "ncaa_3" (the docs also show 3, which is rejected).
     for year in args.years:
         print(f"Season {year}")
-        save(api.get("pitching", years=str(year), division=3), f"pitching_{year}")
-        save(api.get("pitching_team", years=str(year), division=3), f"pitching_team_{year}")
-        save(api.get("expected_runs", year=year, division="ncaa_3"), f"expected_runs_{year}")
+        save(api.get("pitching", years=str(year), division=DIVISION), f"pitching_{year}")
+        save(api.get("pitching_team", years=str(year), division=DIVISION), f"pitching_team_{year}")
+        save(api.get("expected_runs", year=year, division=DIVISION), f"expected_runs_{year}")
     print("Reference tables")
     save(api.get("guts"), "guts")
-    save(api.get("park_factors", division="ncaa_3"), "park_factors")
+    save(api.get("park_factors", division=DIVISION), "park_factors")
 
 
 if __name__ == "__main__":
