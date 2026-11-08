@@ -4,8 +4,12 @@ PRISM API — stateless pitching analytics.
 Open-source and database-free by design: upload a Rapsodo pitching CSV, get the
 full dashboard report back in one response. Nothing is stored server-side.
 """
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import routes_analyze
 from app.core.config import settings
@@ -38,3 +42,23 @@ app.include_router(routes_analyze.router, prefix="/analyze", tags=["Analysis"])
 async def health() -> dict:
     """Liveness probe."""
     return {"status": "ok"}
+
+
+class SinglePageAppFiles(StaticFiles):
+    """
+    Serve the built React app. Paths that aren't a real file (client-side
+    routes like /dashboard) fall back to index.html so React Router handles them.
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            return await super().get_response("index.html", scope)
+
+
+# Mounted last so the API routes above always take priority over the website.
+if settings.STATIC_DIR and Path(settings.STATIC_DIR, "index.html").is_file():
+    app.mount("/", SinglePageAppFiles(directory=settings.STATIC_DIR, html=True), name="site")

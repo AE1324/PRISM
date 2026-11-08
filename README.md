@@ -65,6 +65,15 @@ docker compose up --build
 - Frontend: http://localhost:5173
 - API + interactive docs: http://localhost:8000/docs
 
+## Hosted version (Render)
+
+The repo includes a production `Dockerfile` and a Render Blueprint
+(`render.yaml`). Render builds one service that serves both the site and the
+API from a single URL, and redeploys automatically on every push to `main`.
+
+To set it up: create a Render account, connect GitHub, choose
+**New → Blueprint**, and select this repository.
+
 ## Run locally (without Docker)
 
 **Backend** (Python 3.12+):

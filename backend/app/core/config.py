@@ -69,6 +69,11 @@ class Settings:
     # deployment.
     SHOW_API_DOCS: bool = _get_bool("SHOW_API_DOCS", True)
 
+    # Folder holding the built frontend (frontend/dist). When set and present,
+    # the API also serves the website from the same address, so a single
+    # deployment hosts the whole app. Unset in local dev, where Vite serves it.
+    STATIC_DIR: str | None = os.getenv("STATIC_DIR") or None
+
     # Reject uploads larger than this (defends the in-memory pipeline).
     MAX_UPLOAD_BYTES: int = _get_int("MAX_UPLOAD_BYTES", 25 * 1024 * 1024)  # 25 MB
 

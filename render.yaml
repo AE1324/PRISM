@@ -1,0 +1,10 @@
+# Render Blueprint: one web service that serves the PRISM site and API.
+# Every push to main redeploys it automatically.
+services:
+  - type: web
+    name: prism
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
