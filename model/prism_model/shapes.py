@@ -1,9 +1,13 @@
 """
-Shape-family classification.
+Pitch classification: bucket, pitch type, and subtype.
 
-PRISM ignores device pitch tags. Every pitch is sorted into a shape family
-from its movement and speed relative to the pitcher's own primary fastball, so
-the same rules work for an MLB arm and a Division III arm.
+PRISM ignores device pitch tags. Every pitch is classified from its movement
+and speed relative to the pitcher's own primary fastball, so the same rules
+work for an MLB arm and a Division III arm. Three levels:
+
+  Bucket     Fastball | Breaking | Offspeed   (Stuff+ compares within a bucket)
+  Pitch type Four-seam, Sinker, Cutter | Slider, Curveball | Changeup
+  Subtype    e.g. Riding four-seam, Sweeper, 12-6 curveball, Splitter
 
 How it works
 ------------
@@ -12,8 +16,11 @@ How it works
 2. ``shape_features`` describes every pitch relative to that fastball, plus its
    own movement and spin direction. Raw velocity is deliberately excluded so a
    slower D3 fastball still reads as a fastball.
-3. A classifier learns the families from MLB's pitch tags, then predicts a
-   family for any pitch from its shape alone.
+3. A classifier learns the pitch types from MLB's pitch tags, then predicts a
+   pitch type for any pitch from its shape alone.
+4. ``assign_subtypes`` applies movement thresholds (``SUBTYPE_RULES``) to each
+   pitcher's average shape for each pitch type, so a pitcher's slider gets one
+   subtype rather than flipping pitch to pitch.
 
 Usage (from the model/ folder):
     python -m prism_model.shapes train      # train, validate, save the classifier
@@ -33,23 +40,68 @@ ARTIFACT_DIR = DATA_DIR / "models"
 CLASSIFIER_PATH = ARTIFACT_DIR / "shape_classifier.joblib"
 REPORT_PATH = ARTIFACT_DIR / "shape_classifier_report.json"
 
-# Statcast pitch-type codes -> PRISM shape family. Unlisted codes (knuckleball,
-# eephus, pitchout, unknown) are left out of training.
+# Statcast pitch-type codes -> PRISM pitch type. Sweepers and slurves are
+# slider subtypes; splitters and forkballs are changeup subtypes. Unlisted codes
+# (knuckleball, eephus, pitchout, unknown) are left out of training.
 FAMILY = {
     "FF": "Four-seam",
     "SI": "Sinker",
     "FC": "Cutter",
     "SL": "Slider",
-    "ST": "Sweeper",
-    "SV": "Curveball",  # slurve: closest to a curveball by shape
+    "ST": "Slider",
+    "SV": "Slider",
     "CU": "Curveball",
     "KC": "Curveball",
     "CS": "Curveball",
     "CH": "Changeup",
-    "FS": "Splitter",
-    "FO": "Splitter",
+    "FS": "Changeup",
+    "FO": "Changeup",
 }
-FAMILIES = ["Four-seam", "Sinker", "Cutter", "Slider", "Sweeper", "Curveball", "Changeup", "Splitter"]
+FAMILIES = ["Four-seam", "Sinker", "Cutter", "Slider", "Curveball", "Changeup"]
+
+BUCKET = {
+    "Four-seam": "Fastball",
+    "Sinker": "Fastball",
+    "Cutter": "Fastball",
+    "Slider": "Breaking",
+    "Curveball": "Breaking",
+    "Changeup": "Offspeed",
+}
+
+# Subtype thresholds, applied to a pitcher's median shape for each pitch type.
+# Movement in inches; "glove" is glove-side break (positive = toward the glove
+# side). Rules are checked in order and the first match wins; the last entry
+# for each pitch type is the default. These are starting points to tune.
+SUBTYPE_RULES = {
+    "Four-seam": [
+        ("Riding", lambda m: m["ivb"] >= 18),
+        ("Flat", lambda m: m["ivb"] < 14),
+        ("Standard", lambda m: True),
+    ],
+    "Sinker": [
+        ("Two-seam", lambda m: m["ivb"] >= 10),
+        ("Sinker", lambda m: True),
+    ],
+    "Cutter": [
+        ("Hard cutter", lambda m: m["ivb"] >= 8),
+        ("Short cutter", lambda m: True),
+    ],
+    "Slider": [
+        ("Sweeper", lambda m: m["glove"] >= 10 and m["ivb"] > -4),
+        ("Slurve", lambda m: m["glove"] >= 6 and m["ivb"] <= -4),
+        ("Gyro", lambda m: True),
+    ],
+    "Curveball": [
+        ("12-6", lambda m: m["glove"] < 5),
+        ("Slurve", lambda m: m["glove"] >= -m["ivb"]),
+        ("Traditional", lambda m: True),
+    ],
+    "Changeup": [
+        ("Splitter", lambda m: m["spin_ratio"] < 0.65),
+        ("Fading", lambda m: m["hb_diff"] >= 4),
+        ("Standard", lambda m: True),
+    ],
+}
 
 FEATURES = [
     "velo_diff",         # mph slower (negative) or faster than the primary fastball
@@ -184,6 +236,39 @@ def train(years: list[int]) -> dict:
     return report
 
 
+def subtype_for(pitch_type: str, shape: dict) -> str | None:
+    """The subtype for one pitch type given its median shape, or None if unknown."""
+    rules = SUBTYPE_RULES.get(pitch_type)
+    if not rules or any(pd.isna(v) for v in shape.values()):
+        return None
+    for name, test in rules:
+        if test(shape):
+            return name
+    return None
+
+
+def assign_subtypes(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
+    """
+    Add ``subtype`` from each pitcher's median shape for each pitch type.
+
+    Expects ``shape_family`` plus the shape features already computed.
+    """
+    by = (by or ["PitcherId", "Season"]) + ["shape_family"]
+    feats = shape_features(df)
+    work = pd.concat([df[by], feats], axis=1).dropna(subset=["shape_family"])
+    med = work.groupby(by)[["InducedVertBreak", "hb_arm", "hb_diff", "spin_ratio"]].median().reset_index()
+    med["subtype"] = [
+        subtype_for(row.shape_family, {
+            "ivb": row.InducedVertBreak,
+            "glove": -row.hb_arm,
+            "hb_diff": row.hb_diff,
+            "spin_ratio": row.spin_ratio,
+        })
+        for row in med.itertuples()
+    ]
+    return df.merge(med[by + ["subtype"]], on=by, how="left")
+
+
 def classify(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
     """Add fastball reference, ``shape_family`` and ``shape_conf`` to a PRISM-format frame."""
     from joblib import load
@@ -198,7 +283,19 @@ def classify(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
         proba = clf.predict_proba(feats[ok])
         df.loc[ok, "shape_family"] = clf.classes_[proba.argmax(axis=1)]
         df.loc[ok, "shape_conf"] = proba.max(axis=1)
-    return df
+    df["bucket"] = df["shape_family"].map(BUCKET)
+    return assign_subtypes(df, by=by)
+
+
+def print_subtype_summary(df: pd.DataFrame) -> None:
+    """How subtypes line up with MLB's tags, as a sanity check on the thresholds."""
+    pitched = df.dropna(subset=["subtype"])
+    print("\nSubtype share within each pitch type:")
+    share = pitched.groupby("shape_family")["subtype"].value_counts(normalize=True).round(3)
+    print(share.to_string())
+    print("\nMLB tag vs PRISM subtype (row share):")
+    cross = pd.crosstab(pitched["TaggedPitchType"], pitched["subtype"], normalize="index").round(2)
+    print(cross.loc[[t for t in ["FF", "SI", "FC", "SL", "ST", "SV", "CU", "KC", "CH", "FS"] if t in cross.index]].to_string())
 
 
 def print_report(report: dict) -> None:
@@ -230,6 +327,8 @@ def main() -> None:
             out = classify(pd.read_parquet(path))
             out.to_parquet(PROCESSED_DIR / f"statcast_{year}_shapes.parquet", index=False)
             print(f"{year}: classified {out['shape_family'].notna().sum():,} pitches")
+            if year == args.years[-1]:
+                print_subtype_summary(out)
 
 
 if __name__ == "__main__":

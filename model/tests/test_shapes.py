@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prism_model.shapes import MIN_PITCHES, add_fastball_reference, shape_features
+from prism_model.shapes import BUCKET, FAMILIES, MIN_PITCHES, add_fastball_reference, shape_features, subtype_for
 
 
 def session(pitcher="1", throws="R", fb_velo=84.0, n_fb=20, n_sl=10, n_ch=6):
@@ -56,3 +56,25 @@ def test_lefty_spin_axis_is_mirrored():
 def test_too_few_pitches_gets_no_reference():
     small = session(n_fb=MIN_PITCHES - 10, n_sl=2, n_ch=0)
     assert add_fastball_reference(small)["fb_velo"].isna().all()
+
+
+def test_every_pitch_type_has_a_bucket_and_cutters_are_fastballs():
+    assert set(BUCKET) == set(FAMILIES)
+    assert BUCKET["Cutter"] == "Fastball"
+
+
+@pytest.mark.parametrize("pitch_type, shape, expected", [
+    ("Four-seam", dict(ivb=19, glove=-8, hb_diff=0, spin_ratio=1), "Riding"),
+    ("Four-seam", dict(ivb=12, glove=-8, hb_diff=0, spin_ratio=1), "Flat"),
+    ("Slider", dict(ivb=1, glove=14, hb_diff=-20, spin_ratio=1.1), "Sweeper"),
+    ("Slider", dict(ivb=-6, glove=8, hb_diff=-16, spin_ratio=1.1), "Slurve"),
+    ("Slider", dict(ivb=2, glove=3, hb_diff=-10, spin_ratio=1.1), "Gyro"),
+    ("Curveball", dict(ivb=-14, glove=2, hb_diff=-10, spin_ratio=1.1), "12-6"),
+    ("Curveball", dict(ivb=-8, glove=12, hb_diff=-20, spin_ratio=1.1), "Slurve"),
+    ("Curveball", dict(ivb=-14, glove=8, hb_diff=-16, spin_ratio=1.1), "Traditional"),
+    ("Changeup", dict(ivb=4, glove=-12, hb_diff=2, spin_ratio=0.55), "Splitter"),
+    ("Changeup", dict(ivb=6, glove=-15, hb_diff=6, spin_ratio=0.8), "Fading"),
+    ("Changeup", dict(ivb=6, glove=-10, hb_diff=1, spin_ratio=0.8), "Standard"),
+])
+def test_subtype_rules(pitch_type, shape, expected):
+    assert subtype_for(pitch_type, shape) == expected
