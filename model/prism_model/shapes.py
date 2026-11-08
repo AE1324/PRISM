@@ -81,7 +81,7 @@ KNUCKLEBALL_MAX_RPM = 400
 
 def is_slurve(m: dict) -> bool:
     """Roughly equal sweep and drop: its own shape, filed under curveballs."""
-    return m["glove"] >= 6 and m["ivb"] <= -4 and m["glove"] >= -m["ivb"] * 0.6
+    return m["glove"] >= 6 and m["ivb"] <= -4 and m["glove"] >= -m["ivb"] * 0.9
 
 
 # Subtype tags, applied to a pitcher's median shape for each pitch type.
