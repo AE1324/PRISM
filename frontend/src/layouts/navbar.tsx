@@ -13,10 +13,8 @@ export default function Navbar() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // The landing page (`/`) hosts the `#top` and `#features` sections. When we
-  // arrive there with an anchor in the URL — e.g. clicking "Features" from
-  // `/sample` navigates to `/#features` — scroll that section into view once
-  // it's mounted. Runs on every location change so cross-page nav lands in the
+  // If we arrive on the home page with an anchor in the URL, scroll that
+  // section into view once it's mounted. Runs on every location change so cross-page nav lands in the
   // right spot instead of dumping you at the top.
   useEffect(() => {
     if (location.pathname !== "/") return;
@@ -43,7 +41,7 @@ export default function Navbar() {
 
   const links = [
     { label: "Home", to: "/" },
-    { label: "Features", to: "/#features" },
+    { label: "Workspace", to: "/workspace" },
     { label: "Sample data", to: "/sample" },
   ];
 
