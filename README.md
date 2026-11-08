@@ -125,6 +125,12 @@ The defaults are tuned for local development. For a public deployment:
   abuse protection belongs at this layer, not in per-process app state.
 - Optionally set `SHOW_API_DOCS=false` to hide the interactive docs.
 
+## Model and data pipeline
+
+The grading model and its data pulls live in [`model/`](model/). See
+[model/README.md](model/README.md) for setup and how to pull Statcast and
+D3 Dashboard data.
+
 ## Documentation
 
 Design docs for contributors live in [`docs/`](docs/):

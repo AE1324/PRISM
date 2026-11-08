@@ -42,3 +42,4 @@ data/
 models/*.pkl
 models/*.joblib
 .ipynb_checkpoints/
+.pytest_cache/
