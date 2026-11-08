@@ -5,7 +5,7 @@ import { PrismLogo, SiteNav, SitePage } from "@/features/site/site-shell";
 export default function HomePage() {
   return (
     <SitePage>
-      <SiteNav showLogo={false} />
+      <SiteNav />
 
       <main className="flex flex-1 items-center justify-center px-6 pt-10 pb-24">
         <div className="flex w-full max-w-[640px] flex-col items-center text-center">
