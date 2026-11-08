@@ -1,6 +1,6 @@
 # PRISM
 
-**Pitch Rating and Integrated Stuff Model**
+**Pitch Rating Integrated Stuff Model**
 
 PRISM is a pitching analytics and pitch grading system built for Oberlin College
 Baseball. It turns pitch-tracking data into grades and explanations that coaches
