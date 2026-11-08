@@ -107,19 +107,22 @@ def parse_and_validate(raw: bytes) -> ParsedCsv:
     # not break an otherwise-valid export.
     player_id: str | None = None
     player_name: str | None = None
+    saw_metadata = False  # the lines must exist; their values may be blank
     header_index: int | None = None
 
     for idx, line in enumerate(all_lines):
         stripped = line.strip().strip('"')
         if stripped.startswith(PLAYER_ID_PREFIX):
+            saw_metadata = True
             player_id = _extract_meta_value(line)
         elif stripped.startswith(PLAYER_NAME_PREFIX):
+            saw_metadata = True
             player_name = _extract_meta_value(line)
         elif line.lstrip().startswith('"No"') or line.lstrip().startswith("No,"):
             header_index = idx
             break
 
-    if player_id is None and player_name is None:
+    if not saw_metadata:
         raise CsvValidationError(
             "Missing player metadata. A Rapsodo export must begin with "
             f'"{PLAYER_ID_PREFIX}" and "{PLAYER_NAME_PREFIX}" lines.'
@@ -146,6 +149,14 @@ def parse_and_validate(raw: bytes) -> ParsedCsv:
     rows = [row for row in reader]
     if not rows:
         raise CsvValidationError("No pitch rows found below the header.")
+
+    # A row only counts as a tracked pitch if it has a velocity reading. A file
+    # of numbered but empty rows (e.g. a blank template) has nothing to analyze.
+    if not any((row.get("Velocity") or "").strip() not in ("", "-") for row in rows):
+        raise CsvValidationError(
+            "No tracked pitches found. Every row is missing a velocity reading, "
+            "so this looks like a blank template rather than a session export."
+        )
 
     return ParsedCsv(
         player_id=player_id,
