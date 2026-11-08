@@ -10,11 +10,11 @@ def session(pitcher="1", throws="R", fb_velo=84.0, n_fb=20, n_sl=10, n_ch=6):
     """A synthetic outing: fastballs, sliders, and changeups with fixed shapes."""
     rows = []
     for _ in range(n_fb):
-        rows.append(dict(RelSpeed=fb_velo, InducedVertBreak=16.0, hb_arm=8.0, SpinAxis=210.0))
+        rows.append(dict(RelSpeed=fb_velo, InducedVertBreak=16.0, hb_arm=8.0, SpinAxis=210.0, SpinRate=2200.0))
     for _ in range(n_sl):
-        rows.append(dict(RelSpeed=fb_velo - 10, InducedVertBreak=1.0, hb_arm=-6.0, SpinAxis=60.0))
+        rows.append(dict(RelSpeed=fb_velo - 10, InducedVertBreak=1.0, hb_arm=-6.0, SpinAxis=60.0, SpinRate=2400.0))
     for _ in range(n_ch):
-        rows.append(dict(RelSpeed=fb_velo - 8, InducedVertBreak=6.0, hb_arm=14.0, SpinAxis=240.0))
+        rows.append(dict(RelSpeed=fb_velo - 8, InducedVertBreak=6.0, hb_arm=14.0, SpinAxis=240.0, SpinRate=1650.0))
     df = pd.DataFrame(rows)
     df["PitcherId"], df["Season"], df["PitcherThrows"] = pitcher, 2026, throws
     return df
@@ -33,6 +33,7 @@ def test_features_are_relative_to_the_fastball():
     assert slider["velo_diff"] == pytest.approx(-10.0)
     assert slider["ivb_diff"] == pytest.approx(-15.0)
     assert slider["hb_diff"] == pytest.approx(-14.0)
+    assert feats.iloc[30]["spin_ratio"] == pytest.approx(1650 / 2200)
 
 
 def test_same_shape_at_different_speeds_gives_same_features():

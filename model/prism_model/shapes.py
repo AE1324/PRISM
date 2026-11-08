@@ -59,6 +59,7 @@ FEATURES = [
     "hb_diff",           # in, relative to the primary fastball
     "axis_sin",          # spin direction, mirrored for lefties
     "axis_cos",
+    "spin_ratio",        # spin rate / the primary fastball's spin rate
 ]
 
 # A pitcher-season (or session) needs this many tracked pitches to get a
@@ -84,13 +85,18 @@ def add_fastball_reference(df: pd.DataFrame, by: list[str] | None = None) -> pd.
     ref = (
         df[hard]
         .groupby(by)
-        .agg(fb_velo=("RelSpeed", "median"), fb_ivb=("InducedVertBreak", "median"), fb_hb=("hb_arm", "median"))
+        .agg(
+            fb_velo=("RelSpeed", "median"),
+            fb_ivb=("InducedVertBreak", "median"),
+            fb_hb=("hb_arm", "median"),
+            fb_spin=("SpinRate", "median"),
+        )
         .reset_index()
     )
     counts = df.groupby(by)["RelSpeed"].count().rename("n_tracked").reset_index()
     df = df.merge(ref, on=by, how="left").merge(counts, on=by, how="left")
     too_few = df["n_tracked"] < MIN_PITCHES
-    df.loc[too_few, ["fb_velo", "fb_ivb", "fb_hb"]] = np.nan
+    df.loc[too_few, ["fb_velo", "fb_ivb", "fb_hb", "fb_spin"]] = np.nan
     return df.drop(columns="n_tracked")
 
 
@@ -107,12 +113,15 @@ def shape_features(df: pd.DataFrame) -> pd.DataFrame:
     rad = np.radians(axis.astype(float))
     out["axis_sin"] = np.sin(rad)
     out["axis_cos"] = np.cos(rad)
+    # Relative spin keeps the changeup/splitter signal without penalizing
+    # arms that spin the ball less overall.
+    out["spin_ratio"] = df["SpinRate"] / df["fb_spin"]
     return out[FEATURES]
 
 
 def load_statcast(years: list[int]) -> pd.DataFrame:
     cols = ["Season", "PitcherId", "PitcherThrows", "TaggedPitchType", "RelSpeed",
-            "InducedVertBreak", "hb_arm", "SpinAxis"]
+            "InducedVertBreak", "hb_arm", "SpinAxis", "SpinRate"]
     df = pd.concat(
         [pd.read_parquet(PROCESSED_DIR / f"statcast_{y}.parquet", columns=cols) for y in years],
         ignore_index=True,
@@ -140,12 +149,23 @@ def train(years: list[int]) -> dict:
     clf.fit(X.iloc[tr], y.iloc[tr])
     pred = clf.predict(X.iloc[te])
 
+    # PRISM grades a pitcher's pitch type as a whole, so also score the
+    # majority prediction for each held-out pitcher's pitch type.
+    held = df.iloc[te][["PitcherId", "Season", "TaggedPitchType", "family"]].copy()
+    held["pred"] = pred
+    by_type = held.groupby(["PitcherId", "Season", "TaggedPitchType"]).agg(
+        family=("family", "first"), pred=("pred", lambda s: s.mode().iloc[0]), n=("pred", "size")
+    )
+    by_type = by_type[by_type["n"] >= 25]
+
     report = {
         "years": years,
         "train_pitches": int(len(tr)),
         "test_pitches": int(len(te)),
         "held_out_pitchers": int(df["PitcherId"].iloc[te].nunique()),
         "accuracy": round(float(accuracy_score(y.iloc[te], pred)), 4),
+        "pitch_type_accuracy": round(float((by_type["family"] == by_type["pred"]).mean()), 4),
+        "pitch_types_scored": int(len(by_type)),
         "accuracy_by_family": {
             fam: round(float((pred[y.iloc[te].values == fam] == fam).mean()), 4)
             for fam in FAMILIES if (y.iloc[te] == fam).any()
@@ -183,7 +203,9 @@ def classify(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
 
 def print_report(report: dict) -> None:
     print(f"Held-out pitchers: {report['held_out_pitchers']:,} ({report['test_pitches']:,} pitches)")
-    print(f"Overall agreement with MLB tags: {report['accuracy']:.1%}")
+    print(f"Pitch-by-pitch agreement with MLB tags: {report['accuracy']:.1%}")
+    print(f"Pitch-type agreement (majority vote, 25+ pitches): {report['pitch_type_accuracy']:.1%} "
+          f"of {report['pitch_types_scored']:,} pitcher pitch types")
     for fam, acc in report["accuracy_by_family"].items():
         print(f"  {fam:<10} {acc:.1%}")
     labels, matrix = report["confusion"]["labels"], report["confusion"]["matrix"]
