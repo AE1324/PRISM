@@ -131,25 +131,34 @@ def aggregate(df: pd.DataFrame, by: list[str] | None = None, min_pitches: int = 
 # --------------------------------------------------------------------------
 # Models
 # --------------------------------------------------------------------------
-def make_model(features: list[str]):
+# Candidate settings, from flexible to very conservative. Pitch-level run value
+# is noisy, so the simpler settings usually win; ``train`` picks by
+# cross-validated rank correlation.
+CONFIGS = {
+    "flexible": dict(max_iter=400, learning_rate=0.04, max_leaf_nodes=15, min_samples_leaf=40, l2_regularization=1.0),
+    "moderate": dict(max_iter=200, learning_rate=0.03, max_leaf_nodes=8, min_samples_leaf=80, l2_regularization=5.0),
+    "conservative": dict(max_iter=150, learning_rate=0.03, max_leaf_nodes=5, min_samples_leaf=150, l2_regularization=10.0),
+    "very_conservative": dict(max_iter=100, learning_rate=0.03, max_leaf_nodes=4, min_samples_leaf=250, l2_regularization=20.0),
+}
+DEFAULT_CONFIG = "moderate"
+
+
+def make_model(features: list[str], config: str = DEFAULT_CONFIG):
     from sklearn.ensemble import HistGradientBoostingRegressor
 
     # Lower expected runs is better, so velocity must push predictions down.
     monotonic = [-1 if f == VELO_FEATURE else 0 for f in features]
-    return HistGradientBoostingRegressor(
-        max_iter=400, learning_rate=0.04, max_leaf_nodes=15, min_samples_leaf=40,
-        l2_regularization=1.0, monotonic_cst=monotonic, random_state=7,
-    )
+    return HistGradientBoostingRegressor(**CONFIGS[config], monotonic_cst=monotonic, random_state=7)
 
 
-def evaluate(rows: pd.DataFrame, features: list[str]) -> dict:
+def evaluate(rows: pd.DataFrame, features: list[str], config: str = DEFAULT_CONFIG) -> dict:
     """5-fold, pitcher-grouped cross-validation scored on out-of-fold predictions."""
     from sklearn.model_selection import GroupKFold
 
     X, y, w = rows[features], rows["xrv100"], rows["n"]
     oof = np.zeros(len(rows))
     for tr, te in GroupKFold(n_splits=5).split(X, y, groups=rows["PitcherId"]):
-        m = make_model(features).fit(X.iloc[tr], y.iloc[tr], sample_weight=w.iloc[tr])
+        m = make_model(features, config).fit(X.iloc[tr], y.iloc[tr], sample_weight=w.iloc[tr])
         oof[te] = m.predict(X.iloc[te])
 
     resid = y - oof
@@ -159,6 +168,7 @@ def evaluate(rows: pd.DataFrame, features: list[str]) -> dict:
     top = np.average(y[q == 0], weights=w[q == 0])      # lowest predicted runs = best stuff
     bottom = np.average(y[q == 4], weights=w[q == 4])
     return {
+        "config": config,
         "rows": int(len(rows)),
         "r2": round(float(r2), 3),
         "rank_corr": round(float(rank_corr), 3),
@@ -180,16 +190,21 @@ def train(years: list[int]) -> dict:
     for group, spec in GROUPS.items():
         g = rows[rows["group"] == group].dropna(subset=spec["features"] + ["xrv100"])
         shape_features = [f for f in spec["features"] if f != VELO_FEATURE]
+        # Pick the setting that ranks held-out pitchers best for this group.
+        trials = {c: evaluate(g, spec["features"], c) for c in CONFIGS}
+        best = max(trials, key=lambda c: trials[c]["rank_corr"])
+        print(f"{group}: " + ", ".join(f"{c} {t['rank_corr']:.3f}" for c, t in trials.items()) + f" -> {best}")
         report["groups"][group] = {
             "pitch_types": g["shape_family"].value_counts().to_dict(),
-            "stuff": evaluate(g, spec["features"]),
-            "shape": evaluate(g, shape_features),
+            "stuff": trials[best],
+            "shape": evaluate(g, shape_features, best),
         }
         models[group] = {
+            "config": best,
             "features": spec["features"],
-            "stuff": make_model(spec["features"]).fit(g[spec["features"]], g["xrv100"], sample_weight=g["n"]),
+            "stuff": make_model(spec["features"], best).fit(g[spec["features"]], g["xrv100"], sample_weight=g["n"]),
             "shape_features": shape_features,
-            "shape": make_model(shape_features).fit(g[shape_features], g["xrv100"], sample_weight=g["n"]),
+            "shape": make_model(shape_features, best).fit(g[shape_features], g["xrv100"], sample_weight=g["n"]),
         }
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
@@ -237,7 +252,7 @@ def scale_within(rows: pd.DataFrame, reference: pd.DataFrame, col: str, by: str 
 
 
 def print_report(report: dict) -> None:
-    print(f"Training rows: pitcher-season pitch types with {report['min_pitches']}+ pitches\n")
+    print(f"\nTraining rows: pitcher-season pitch types with {report['min_pitches']}+ pitches, seasons {report['years']}\n")
     print(f"{'Group':<10}{'rows':>7}{'R²':>8}{'rank r':>9}{'top-bottom runs/100':>22}")
     for group, r in report["groups"].items():
         for kind in ("stuff", "shape"):
