@@ -82,3 +82,16 @@ def test_every_pitch_type_has_a_bucket_and_cutters_are_fastballs():
 ])
 def test_subtype_rules(pitch_type, shape, expected):
     assert subtype_for(pitch_type, shape) == expected
+
+
+def test_consolidate_merges_label_splits_but_not_distinct_pitches():
+    from prism_model.shapes import consolidate
+
+    def pitch(kind, velo, ivb, hb, pid="1"):
+        return {"PitcherId": pid, "shape_family": kind, "shape_conf": 0.6, "RelSpeed": velo, "InducedVertBreak": ivb, "hb_arm": hb}
+
+    rows = ([pitch("Four-seam", 87, 8, 15)] * 6 + [pitch("Sinker", 87, 7, 16)] * 4             # one pitch, split two ways
+            + [pitch("Four-seam", 95, 17, 7, "2")] * 6 + [pitch("Sinker", 94, 8, 16, "2")] * 4)  # two real pitches
+    out = consolidate(pd.DataFrame(rows), by=["PitcherId"])
+    assert set(out.loc[out["PitcherId"] == "1", "shape_family"]) == {"Four-seam"}
+    assert set(out.loc[out["PitcherId"] == "2", "shape_family"]) == {"Four-seam", "Sinker"}

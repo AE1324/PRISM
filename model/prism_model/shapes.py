@@ -281,8 +281,49 @@ def assign_subtypes(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFra
     return df.drop(columns="new_family")
 
 
-def classify(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
-    """Add fastball reference, ``shape_family`` and ``shape_conf`` to a PRISM-format frame."""
+MERGE_VELO_MPH = 2.5
+MERGE_MOVEMENT_IN = 5.0
+
+
+def consolidate(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
+    """
+    Merge pitch-by-pitch label splits within a pitcher.
+
+    A borderline pitch can be labeled two ways from one pitch to the next (a
+    sinking four-seam called four-seam on some pitches and sinker on others).
+    Within each pitcher and group, a smaller pitch type whose average speed and
+    movement sit on top of a larger one (within 2.5 mph and 5 in) is folded
+    into it. Genuinely different pitches (an MLB four-seam and sinker are
+    usually ~10 in apart) are left alone.
+    """
+    df = df.copy()
+    bucket = df["shape_family"].map(BUCKET)
+    for _, grp in df[df["shape_family"].notna() & (df["shape_family"] != "Knuckleball")].groupby(by):
+        g_bucket = bucket.loc[grp.index]
+        for b in g_bucket.dropna().unique():
+            sub = grp[g_bucket == b]
+            stats = sub.groupby("shape_family").agg(n=("RelSpeed", "size"), conf=("shape_conf", "sum"), velo=("RelSpeed", "mean"),
+                                                    ivb=("InducedVertBreak", "mean"), hb=("hb_arm", "mean"))
+            stats = stats.sort_values(["n", "conf"], ascending=False)
+            keep = []
+            for kind, r in stats.iterrows():
+                target = next((k for k in keep
+                               if abs(r["velo"] - stats.loc[k, "velo"]) <= MERGE_VELO_MPH
+                               and np.hypot(r["ivb"] - stats.loc[k, "ivb"], r["hb"] - stats.loc[k, "hb"]) <= MERGE_MOVEMENT_IN), None)
+                if target is None:
+                    keep.append(kind)
+                else:
+                    df.loc[sub.index[sub["shape_family"] == kind], "shape_family"] = target
+    return df
+
+
+def classify(df: pd.DataFrame, by: list[str] | None = None, merge_splits: bool = False) -> pd.DataFrame:
+    """
+    Add fastball reference, ``shape_family`` and ``shape_conf`` to a PRISM-format frame.
+
+    ``merge_splits`` folds near-identical pitch types within a pitcher together
+    (see ``consolidate``); used for team reports, not for MLB training data.
+    """
     from joblib import load
 
     clf = load(CLASSIFIER_PATH)
@@ -297,6 +338,8 @@ def classify(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFrame:
         df.loc[ok, "shape_conf"] = proba.max(axis=1)
     knuckle = df["SpinRate"] < KNUCKLEBALL_MAX_RPM
     df.loc[knuckle, "shape_family"] = "Knuckleball"
+    if merge_splits:
+        df = consolidate(df, by or ["PitcherId", "Season"])
     df["bucket"] = df["shape_family"].map(BUCKET)
     return assign_subtypes(df, by=by)
 

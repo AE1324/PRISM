@@ -109,8 +109,8 @@ def _pct(x):
 
 def display_name(name) -> str:
     """'Last, First' -> 'First Last'."""
-    if not isinstance(name, str):
-        return str(name)
+    if not isinstance(name, str) or name.strip().isdigit():
+        return f"Pitcher {name}"
     if "," in name:
         last, first = [p.strip() for p in name.split(",", 1)]
         return f"{first} {last}".strip()
@@ -637,6 +637,8 @@ def development(p: pd.DataFrame, rows: pd.DataFrame, judged: dict, sit: dict, st
 
 def summary_sentence(name: str, dev: dict, judged: dict, rows: pd.DataFrame) -> str:
     graded = rows[rows["pitch_plus"].notna()].sort_values("pitch_plus", ascending=False)
+    if graded.empty:
+        return f"{name} doesn't have enough pitches of any one type to grade yet."
     parts = [f"{name} has {dev['stuff']['label']} stuff"]
     if dev["command"].get("label"):
         parts[0] += f" and {dev['command']['label']}"
@@ -743,7 +745,7 @@ def build_reports(paths: list[str], scale: str = "group", team: str | None = Non
     from prism_model.shapes import classify
 
     df = pd.concat([read_trackman(p) for p in paths], ignore_index=True)
-    df = classify(df, by=["PitcherId"])
+    df = classify(df, by=["PitcherId"], merge_splits=True)
     ref, mlb_rows = references.load()
     pitchers = None
     if team:
