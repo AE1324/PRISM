@@ -40,6 +40,7 @@ ID_COLUMNS = [
     "Pitcher",
     "PitcherId",
     "PitcherThrows",     # R | L
+    "PitcherTeam",
     "Batter",
     "BatterId",
     "BatterSide",        # R | L

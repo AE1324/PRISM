@@ -19,29 +19,19 @@ from pathlib import Path
 
 import pandas as pd
 
-from prism_data.paths import DATA_DIR, PROCESSED_DIR
+from prism_data.paths import DATA_DIR
+from prism_model import references
 from prism_data.trackman import read_trackman
 from prism_model.shapes import classify
-from prism_model.stuff import LOAD_COLUMNS, MIN_PITCHES, aggregate, predict, scale_within, to_plus
+from prism_model.stuff import aggregate, predict, scale_within, to_plus
 
 GRADES_DIR = DATA_DIR / "grades"
-MLB_REFERENCE_PATH = DATA_DIR / "models" / "mlb_reference.parquet"
-MLB_YEARS = [2022, 2023, 2024, 2025]
 
 
 def mlb_reference() -> pd.DataFrame:
-    """Mean and SD of predicted xRV for each pitch type among MLB pitcher-seasons (cached)."""
-    if MLB_REFERENCE_PATH.exists():
-        return pd.read_parquet(MLB_REFERENCE_PATH)
-    print("Building the MLB reference (one time)…")
-    cols = [c for c in LOAD_COLUMNS if c not in ("PitchCall", "RunValue", "xwOBA")]
-    frames = [pd.read_parquet(PROCESSED_DIR / f"statcast_{y}_shapes.parquet", columns=cols) for y in MLB_YEARS]
-    rows = predict(aggregate(pd.concat(frames, ignore_index=True), min_pitches=MIN_PITCHES))
-    ref = rows.groupby("shape_family")[["stuff_xrv", "shape_xrv"]].agg(["mean", "std"])
-    ref.columns = [f"{a}_{b}" for a, b in ref.columns]
-    ref = ref.reset_index()
-    ref.to_parquet(MLB_REFERENCE_PATH, index=False)
-    return ref
+    """Mean and SD of predicted xRV for each pitch type among MLB pitcher-seasons."""
+    ref, _ = references.load()
+    return pd.DataFrame([{"shape_family": k, **v} for k, v in ref["scale"].items()])
 
 
 def grade(df: pd.DataFrame, min_pitches: int = 20) -> pd.DataFrame:
