@@ -35,6 +35,7 @@ ID_COLUMNS = [
     "Source",            # statcast | trackman | rapsodo
     "GameID",
     "Date",
+    "PitchTime",         # timestamp of the pitch when the source has one (used to match sources)
     "Season",
     "PitchNo",           # order within the game or session
     "Pitcher",
