@@ -4,7 +4,7 @@ import { SiteFooter, SiteNav, SitePage } from "@/features/site/site-shell";
 import { bestPitch, clearStaff, loadStaff, parseStaffFile, saveStaff, slug } from "@/features/staff/staff-store";
 import type { StaffFile } from "@/features/staff/types";
 import { num } from "@/features/staff/format";
-import { Dot, Score } from "@/features/staff/components/ui";
+import { GradeCell, Swatch } from "@/features/staff/components/ui";
 import "@/features/staff/staff.css";
 
 /**
@@ -82,11 +82,11 @@ export default function WorkspacePage() {
               </div>
               {error && <p className="pr-err" role="alert">{error}</p>}
               {note && <p className="pr-note">{note}</p>}
-              <div className="pr-panel" style={{ marginTop: 18, padding: "6px 8px" }}>
+              <div style={{ marginTop: 22 }}>
                 <div className="pr-scroll">
                   <table className="pr-roster">
                     <thead>
-                      <tr><th>Pitcher</th><th>Throws</th><th className="num">Pitches</th><th className="num">Outings</th><th className="num">FB velo</th><th className="num">Stuff+</th><th className="num">Location+</th><th>Arsenal</th><th className="c">Best Pitch+</th></tr>
+                      <tr><th>Pitcher</th><th>Throws</th><th className="num">Pitches</th><th className="num">Outings</th><th className="num">FB velo</th><th className="num">Stuff+</th><th className="num">Location+</th><th>Arsenal</th><th className="c">Best Pitch+</th><th>Best pitch</th></tr>
                     </thead>
                     <tbody>
                       {staff.pitchers.map((p) => {
@@ -101,8 +101,9 @@ export default function WorkspacePage() {
                             <td className="num">{num(p.fastball_traits?.velo)}</td>
                             <td className="num">{p.development.stuff.stuff_plus ?? "–"}</td>
                             <td className="num">{p.development.command.location_plus ?? "–"}</td>
-                            <td><span style={{ display: "inline-flex", alignItems: "center" }}>{p.pitch_by_pitch.map((x) => <Dot key={x.pitch} pitch={x.pitch} />)}</span></td>
-                            <td className="c">{best ? <span title={best.pitch}><Score v={best.value} /></span> : <span className="soft">–</span>}</td>
+                            <td><span style={{ display: "inline-flex", alignItems: "center" }} title={p.pitch_by_pitch.map((x) => x.pitch).join(", ")}>{p.pitch_by_pitch.map((x) => <Swatch key={x.pitch} pitch={x.pitch} />)}</span></td>
+                            <GradeCell v={best?.value ?? null} />
+                            <td className="body">{best?.pitch ?? "–"}</td>
                           </tr>
                         );
                       })}

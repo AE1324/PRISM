@@ -1,30 +1,37 @@
 import type { Grade } from "./types";
 
-/** Muted pitch-type colors: distinguishable on the dark ground without being loud. */
+/**
+ * Pitch colors: Savant's familiar hues (four-seam red, slider yellow, curveball cyan, changeup green...),
+ * softened a step so they sit comfortably on the dark page instead of glaring.
+ */
 const PITCH_COLOR: Record<string, string> = {
-  "Four-seam": "#D27F72",
-  Sinker: "#CFA164",
-  Cutter: "#B48BC4",
-  Slider: "#6E9FC9",
-  Curveball: "#8E86C9",
-  Changeup: "#7DB596",
-  Splitter: "#6DB3AE",
-  Knuckleball: "#A7A08F",
+  "Four-seam": "#E0596B",
+  Sinker: "#EDA24A",
+  Cutter: "#C97452",
+  Slider: "#D9C75B",
+  Curveball: "#4FBFD6",
+  Changeup: "#5DBE76",
+  Splitter: "#57AFAB",
+  Knuckleball: "#A39A5A",
 };
-export const pitchColor = (p: string) => PITCH_COLOR[p] ?? "#B9C0CA";
+export const pitchColor = (p: string) => PITCH_COLOR[p] ?? "#C3C9D2";
 
 /**
- * Baseball Savant style shading for a 100-centered grade: blue below average, red above, full strength
- * at 100 +- 25. Muted so it reads on the dark UI. Returns [background, text].
+ * Baseball Savant grade shading for a 100-centered grade: Savant blue below average, Savant red above,
+ * a neutral cell at 100, full strength at 100 +- 25. Returns [background, text].
  */
 export function savant(v: Grade | number | undefined): [string, string] {
   if (typeof v !== "number") return ["transparent", "var(--pr-soft)"];
   const t = Math.max(-1, Math.min(1, (v - 100) / 25));
-  const mid = [24, 29, 36];
-  const end = t > 0 ? [150, 52, 64] : [44, 74, 128];
-  const c = mid.map((m, i) => Math.round(m + Math.abs(t) * (end[i] - m)));
-  return [`rgb(${c.join(",")})`, Math.abs(t) > 0.15 ? "#F2F4F7" : "var(--pr-body)"];
+  const mid = [46, 51, 59];
+  const end = t > 0 ? [210, 45, 73] : [50, 90, 165];
+  const k = Math.pow(Math.abs(t), 0.8); // reach strong color a little sooner, so 110 / 90 already read clearly
+  const c = mid.map((m, i) => Math.round(m + k * (end[i] - m)));
+  return [`rgb(${c.join(",")})`, "#FFFFFF"];
 }
+
+/** Position (0-1) of a 100-centered grade on a 70-130 bar. */
+export const gradePos = (v: number) => Math.max(0, Math.min(1, (v - 70) / 60));
 
 export const fmtGrade = (v: Grade | undefined) => (typeof v === "number" ? String(Math.round(v)) : "–");
 export const pct = (v: number | null | undefined, digits = 0) => (typeof v === "number" ? `${v.toFixed(digits)}%` : "–");

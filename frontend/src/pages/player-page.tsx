@@ -2,8 +2,8 @@ import { useEffect, useMemo } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { SiteFooter, SiteNav, SitePage } from "@/features/site/site-shell";
 import { loadStaff, slug } from "@/features/staff/staff-store";
-import { num, ordinal, pct } from "@/features/staff/format";
-import { Dot, Score, Status } from "@/features/staff/components/ui";
+import { num, ordinal, pct, pitchColor, savant } from "@/features/staff/format";
+import { PctBar, Status, Swatch, gradeBar, pctColor } from "@/features/staff/components/ui";
 import { CountsTab, OverviewTab, PitchTab, ProgressTab } from "@/features/staff/components/tabs";
 import "@/features/staff/staff.css";
 
@@ -64,43 +64,64 @@ export default function PlayerPage() {
             <button type="button" className="pr-btn pr-noprint" onClick={() => window.print()}>Print / save PDF</button>
           </div>
 
-          <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
-            <h1>{r.pitcher}</h1>
-            <span className="soft">{r.throws === "L" ? "LHP" : "RHP"} · {staff.label} · {r.pitches} pitches · {r.game_pitches} vs hitters · {r.outings} outings</span>
+          <div className="pr-head">
+            <div>
+              <div className="pr-label" style={{ marginBottom: 8 }}>{r.throws === "L" ? "LHP" : "RHP"} · {staff.team} · {staff.label}</div>
+              <h1>{r.pitcher}</h1>
+            </div>
+            <div className="pr-meta mono">{r.pitches} pitches · {r.game_pitches} vs hitters · {r.outings} outings</div>
           </div>
-          <p className="body" style={{ maxWidth: 860, margin: "8px 0 0" }}>{r.summary}</p>
+          <p className="pr-summary">{r.summary}</p>
 
           <div className="pr-kpis">
-            <div><div className="pr-label">Fastball</div><div className="v">{num(fb?.velo)}</div><div className="s">mph · {ordinal(fb?.velo_pct_d3)} pct D3</div></div>
-            <div><div className="pr-label">Perceived</div><div className="v">{num(fb?.perceived_velo)}</div><div className="s">mph · {num(fb?.extension_ft)} ft extension</div></div>
-            <div><div className="pr-label">Stuff+</div><div className="v">{d.stuff.stuff_plus ?? "–"}</div><div className="s">{d.stuff.label}</div></div>
-            <div><div className="pr-label">Location+</div><div className="v">{d.command.location_plus ?? "–"}</div><div className="s">{pct(d.command.strike_pct, 1)} strikes</div></div>
+            <div>
+              <div className="pr-label">Fastball velo</div><div className="v">{num(fb?.velo)}</div>
+              <div className="s">mph · {ordinal(fb?.velo_pct_d3)} pct D3</div>
+              {typeof fb?.velo_pct_d3 === "number" && <PctBar pos={fb.velo_pct_d3 / 100} color={pctColor(fb.velo_pct_d3)} />}
+            </div>
+            <div>
+              <div className="pr-label">Perceived velo</div><div className="v">{num(fb?.perceived_velo)}</div>
+              <div className="s">mph · {num(fb?.extension_ft)} ft extension</div>
+              {typeof fb?.perceived_pct_d3 === "number" && <PctBar pos={fb.perceived_pct_d3 / 100} color={pctColor(fb.perceived_pct_d3)} />}
+            </div>
+            <div>
+              <div className="pr-label">Stuff+</div><div className="v">{d.stuff.stuff_plus ?? "–"}</div>
+              <div className="s">{d.stuff.label}</div>
+              {typeof d.stuff.stuff_plus === "number" && <PctBar {...gradeBar(d.stuff.stuff_plus)} />}
+            </div>
+            <div>
+              <div className="pr-label">Location+</div><div className="v">{d.command.location_plus ?? "–"}</div>
+              <div className="s">{pct(d.command.strike_pct, 1)} strikes</div>
+              {typeof d.command.location_plus === "number" && <PctBar {...gradeBar(d.command.location_plus)} />}
+            </div>
             <div><div className="pr-label">BB%</div><div className="v">{num(d.command.bb_pct)}</div><div className="s">{d.command.pa} PA</div></div>
             <div><div className="pr-label">First-pitch strike</div><div className="v">{fps ? pct(fps.pct, 1) : "–"}</div><div className="s">{fps ? `MLB ${fps.pro_range}` : ""}</div></div>
           </div>
 
           <div className="pr-tabs pr-noprint" role="tablist" aria-label="Sections">
             {TABS.map((t) => (
-              <button key={t} type="button" role="tab" aria-selected={t === tab} onClick={() => set({ tab: t })}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </button>
+              <button key={t} type="button" role="tab" aria-selected={t === tab} onClick={() => set({ tab: t })}>{t}</button>
             ))}
           </div>
 
-          <div className="pr-arsenal" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, marginBottom: 14 }}>
-            {r.pitch_by_pitch.map((p, i) => (
-              <button key={p.pitch} type="button" aria-pressed={tab === "pitches" && i === pitchIdx} onClick={() => set({ tab: "pitches", pitch: i })}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", whiteSpace: "nowrap" }}><Dot pitch={p.pitch} />{p.pitch}&nbsp;<span className="soft">{p.subtype}</span></div>
-                  <div className="soft mono" style={{ fontSize: 11.5, marginTop: 3 }}>{p.usage_pct}% · {num(p.shape?.velo)} mph</div>
-                  <div style={{ marginTop: 6 }}><Status verdict={p.verdict} /></div>
-                </div>
-                <div style={{ textAlign: "center", flex: "none" }}>
-                  <div className="pr-label" style={{ fontSize: 10 }}>Pitch+</div>
-                  <Score v={p.grades.pitch_plus} />
-                </div>
-              </button>
-            ))}
+          <div className="pr-arsenal" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+            {r.pitch_by_pitch.map((p, i) => {
+              const [bg, fg] = savant(p.grades.pitch_plus);
+              return (
+                <button key={p.pitch} type="button" aria-pressed={tab === "pitches" && i === pitchIdx} onClick={() => set({ tab: "pitches", pitch: i })}
+                  style={{ ["--pc" as string]: pitchColor(p.pitch) }}>
+                  <div className="info">
+                    <div className="name"><Swatch pitch={p.pitch} />{p.pitch} <span className="soft" style={{ fontWeight: 400 }}>{p.subtype}</span></div>
+                    <div className="soft mono" style={{ fontSize: 11.5, margin: "4px 0 6px" }}>{p.usage_pct}% · {num(p.shape?.velo)} mph</div>
+                    <Status verdict={p.verdict} />
+                  </div>
+                  <div className="pp" style={{ background: bg, color: fg }}>
+                    <span className="k">PITCH+</span>
+                    <span className="n">{typeof p.grades.pitch_plus === "number" ? Math.round(p.grades.pitch_plus) : "–"}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
           {tab === "overview" && <OverviewTab r={r} />}
