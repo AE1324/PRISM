@@ -779,7 +779,9 @@ TRAITS = {  # trait -> (columns that move with it, step, label, unit)
     # This pitch harder (fastball moves with it, so the gap stays the same). Never asks for slower.
     "velo": (["velo", "perceived_velo"], 0.5, "Velocity", "mph"),
     # Separation from his fastball, with this pitch's own speed held (i.e. the fastball moves).
-    "gap": (["velo_diff"], 0.5, "Gap off fastball", "mph"),
+    # This pitch's own speed with his fastball held where it is: velo, perceived velo and separation move together.
+    # (Moving velo_diff alone would mean an imagined faster fastball, which belongs on the fastball's card.)
+    "gap": (["velo_diff", "velo", "perceived_velo"], 0.5, "Gap off fastball", "mph"),
     "ivb": (["ivb", "ivb_diff"], 1.0, "IVB (ride +)", "in"),
     "hb": (["hb", "hb_diff"], 1.0, "HB (arm side +)", "in"),
     "spin": (["spin"], 100.0, "Spin", "rpm"),
@@ -789,7 +791,8 @@ VELO_FLAG_PCT = 25   # fastball velocity below this D3 percentile becomes a head
 TARGET_GAIN = 5.0   # Stuff+ points a change has to be worth before it becomes a target (small nudges are noise)
 TARGET_BAND = 2.0   # values within this many points of the best count as "in range"
 VELO_UP_MAX = 4.0   # don't ask for more than ~4 mph
-SPIN_MAX_CHANGE = 300.0  # spin is hard to change; look at most +-300 rpm
+SPIN_MAX_CHANGE = 300.0
+VELO_WINDOW = 2.0   # width of a secondary's velocity target range, set off his current fastball  # spin is hard to change; look at most +-300 rpm
 
 
 def pitch_needing_work(pitches: list[dict]) -> dict | None:
@@ -836,6 +839,12 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
             continue
         if key == "velo":
             lo, hi = 0.0, VELO_UP_MAX
+        elif key == "gap":
+            # Harder: up to +4 mph (never past 1 mph under the fastball). Slower: only changeups/splitters
+            # (by grip), down to the subtype's 10th-percentile separation.
+            q10 = pool[main].dropna().quantile(0.1) if main in pool else np.nan
+            lo = min(float(q10 - r[main]), 0.0) if kind in GRIP_SLOWED and pd.notna(q10) else 0.0
+            hi = max(min(VELO_UP_MAX, -1.0 - float(r[main])), 0.0)
         else:
             q = pool[main].dropna().quantile([0.1, 0.9]) if main in pool else None
             if q is None or q.isna().any():
@@ -858,11 +867,6 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
         now = float(r[main] if key != "velo" else r["velo"])
         win = (now + ok.min(), now + ok.max())
         in_range = gain < TARGET_GAIN or ok.min() <= 0 <= ok.max()
-        if key == "gap" and main in pool:
-            # Only call out the gap when it's unusual for this kind of pitch; otherwise "harder fastball"
-            # is already covered by arsenal velocity.
-            g25, g75 = pool[main].dropna().quantile([0.25, 0.75])
-            in_range = in_range or bool(g25 <= r[main] <= g75)
         best_delta = float(deltas[int(np.nanargmax(g))])
         rows.append({"trait": key, "label": label, "unit": unit, "now": round(now, 1),
                      "lo": round(win[0], 1), "hi": round(win[1], 1), "gain": round(gain, 0),
@@ -871,6 +875,30 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
                      "open_lo": bool(ok.min() <= deltas.min() + 1e-9 and ok.min() < 0)})
     if not rows:
         return None
+    g_row = next((x for x in rows if x["trait"] == "gap"), None)
+    fb_velo = None
+    if g_row is not None:
+        # Secondaries: one Velocity row whose target is a speed range set off his CURRENT fastball (Garnet style).
+        # The separation window comes from the Stuff model (values within 2 Stuff+ of the best), narrowed to the
+        # middle half of MLB pitches of this subtype when that overlaps, so the range is a real, usable target.
+        # A 2 mph window (like Garnet's). When his separation already grades fine it's centered on where he is.
+        # Otherwise it starts at the nearest edge of the band that grades within 2 Stuff+ of the best: the
+        # smallest change that gets nearly all of the gain, not the extreme of the MLB range.
+        fb_velo = float(r["velo"] - r["velo_diff"])
+        now_d = float(r["velo_diff"])
+        if g_row["in_range"]:
+            lo, hi = now_d - VELO_WINDOW / 2, now_d + VELO_WINDOW / 2
+        elif now_d > g_row["hi"]:   # too close to the fastball: window just below the band's near edge
+            lo, hi = g_row["hi"] - VELO_WINDOW, g_row["hi"]
+        else:                        # too far off the fastball: window just above the band's near edge
+            lo, hi = g_row["lo"], g_row["lo"] + VELO_WINDOW
+        rows = [x for x in rows if x["trait"] != "velo"]
+        g_row["hide"] = True  # kept for the plan text, shown through the Velocity row
+        rows.insert(0, {"trait": "velo", "label": "Velocity", "unit": "mph", "now": round(float(r["velo"]), 1),
+                        "lo": round(fb_velo + lo, 1), "hi": round(fb_velo + hi, 1), "gain": g_row["gain"],
+                        "best_delta": g_row["best_delta"], "in_range": g_row["in_range"], "vs_fb": True,
+                        "fb_velo": round(fb_velo, 1), "open_hi": False, "open_lo": False})
+
     def word(x):
         more = x["best_delta"] > 0
         return {"velo": "more velocity", "gap": "less separation from his fastball" if more else "more separation from his fastball", "ivb": "more ride (less drop)" if more else "more drop",
@@ -885,6 +913,8 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
             if x["open_hi"] and not x["open_lo"]:
                 return f"{hi:.1f} mph or less off his fastball"
             return f"{lo:.1f} to {hi:.1f} mph off his fastball"
+        if x.get("vs_fb"):
+            return f"{x['lo']:.1f}–{x['hi']:.1f} mph"
         if x["trait"] == "velo":  # an actual speed for this pitch, only ever up from where he is
             return f"{x['lo']:.1f}+ mph" if x["open_hi"] else (
                 f"{x['lo']:.1f} to {x['hi']:.1f} mph" if x["lo"] != x["hi"] else f"about {x['lo']:.1f} mph")
@@ -900,13 +930,9 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
         x["target_text"] = where(x)
     shape_gaps = sorted((x for x in rows if not x["in_range"] and x["trait"] not in ("velo", "gap")), key=lambda x: -x["gain"])
     gap = next((x for x in rows if x["trait"] == "gap" and not x["in_range"]), None)
-    velo = next((x for x in rows if x["trait"] == "velo" and not x["in_range"]), None)
-    gap_any = next((x for x in rows if x["trait"] == "gap" and not x["in_range"]), None)
-    if gap_any and gap_any["best_delta"] < 0 and kind in GRIP_SLOWED:
-        # A changeup that should come off the fastball more: don't also tell him to throw it harder.
-        # Its speed target lives in the gap row; added velocity goes to the fastball.
-        rows = [x for x in rows if x["trait"] != "velo"]
-        velo = None
+    velo = next((x for x in rows if x["trait"] == "velo" and not x["in_range"] and not x.get("vs_fb")), None)
+    vfb = next((x for x in rows if x.get("vs_fb")), None)
+    rng = (f"{vfb['lo']:.1f}–{vfb['hi']:.1f} mph with his current {vfb['fb_velo']:.1f} mph fastball" if vfb else "")
     parts = []
     if shape_gaps:
         g0 = shape_gaps[0]
@@ -921,17 +947,14 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
             # The one exception: a changeup/splitter too close to the fastball. Slowing it is the pitch's whole
             # design, but it has to come from the grip with fastball arm speed, not from easing up.
             parts.append(f"It's too close to his fastball's speed ({-gap['now']:.1f} mph off; {kind.lower()}s like his "
-                         f"play best at {gap['target_text']}: {gap['gain']:+.0f}). This is the one case where taking speed "
+                         f"play best at {rng}: {gap['gain']:+.0f}). This is the one case where taking speed "
                          "off makes sense, but it has to come from the grip (deeper in the hand, more pronation, less "
                          "fingertip pressure) with the same arm speed as his fastball, never from easing up. Adding velocity "
                          "to the fastball widens the gap too.")
-        elif gap["best_delta"] < 0:
-            parts.append(f"It plays better with more separation from his fastball ({gap['target_text']}, he's at "
-                         f"{-gap['now']:.1f}: {gap['gain']:+.0f}); get there by adding velocity to the fastball, "
-                         "not by slowing this pitch down.")
         else:
-            parts.append(f"It plays better closer to his fastball's speed ({gap['target_text']}, he's at "
-                         f"{-gap['now']:.1f}: {gap['gain']:+.0f}); throw this pitch harder relative to the fastball.")
+            parts.append(f"It plays better closer to his fastball's speed ({rng}; he's {-gap['now']:.1f} off: "
+                         f"{gap['gain']:+.0f}). Throw this pitch harder; as his fastball gains velocity, this range "
+                         "moves up with it.")
     if velo:
         parts.append(f"More velocity helps too: {velo['target_text']} on this pitch ({velo['gain']:+.0f}, he's at "
                      f"{velo['now']:.1f}), coming from more arm speed across his whole arsenal.")

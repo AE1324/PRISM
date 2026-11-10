@@ -15,6 +15,8 @@ import argparse
 import html
 from pathlib import Path
 
+import pandas as pd
+
 from prism_model.fastball_traits import ordinal
 
 CRIMSON = "#8a1f2d"
@@ -33,11 +35,23 @@ def _color(pitch: str) -> str:
     return PITCH_COLORS.get(pitch, "#777")
 
 
+SAVANT_BLUE, SAVANT_MID, SAVANT_RED = (50, 90, 165), (247, 247, 247), (210, 45, 73)
+SAVANT_RANGE = 25.0  # 100 +- 25 (2.5 SD) reaches the full color, like Savant's percentile sliders at the ends
+
+
+def savant_color(v: float) -> tuple[str, str]:
+    """Baseball Savant style: blue below average, gray-white at 100, red above. Returns (background, text)."""
+    t = max(-1.0, min(1.0, (v - 100.0) / SAVANT_RANGE))
+    end = SAVANT_RED if t > 0 else SAVANT_BLUE
+    rgb = tuple(round(m + abs(t) * (e - m)) for m, e in zip(SAVANT_MID, end))
+    return f"rgb{rgb}", ("#ffffff" if abs(t) >= 0.55 else "#1d1d1f")
+
+
 def grade_cell(v) -> str:
-    if not isinstance(v, (int, float)):
+    if not isinstance(v, (int, float)) or pd.isna(v):
         return '<td class="g na">N/A</td>'
-    tone = "lo" if v <= 92 else "hi" if v >= 108 else ""
-    return f'<td class="g {tone}">{int(round(v))}</td>'
+    bg, fg = savant_color(float(v))
+    return f'<td class="g" style="background:{bg};color:{fg}">{int(round(v))}</td>'
 
 
 CSS = f"""
@@ -80,8 +94,7 @@ th {{ text-align: left; font-size: 7pt; letter-spacing: 0.8px; text-transform: u
       border-bottom: 1.5px solid {CRIMSON}; padding: 3px 6px; font-weight: 700; }}
 td {{ padding: 3.5px 6px; border-bottom: 1px solid #eee; }}
 td.num, th.num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-td.g {{ text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }}
-td.g.lo {{ color: {CRIMSON}; background: #f8e6e8; }} td.g.hi {{ color: #1f6b40; background: #e6f4ec; }}
+td.g {{ text-align: center; border: 1.5px solid #fff; border-radius: 4px; font-weight: 700; font-variant-numeric: tabular-nums; }}
 td.g.na {{ color: #aaa; font-weight: 400; }}
 td.in {{ color: #1f6b40; font-weight: 700; }} td.out {{ color: {CRIMSON}; font-weight: 700; }}
 .why {{ font-size: 8pt; color: #333; margin: 1px 0 7px; }}
@@ -303,12 +316,14 @@ def needs_work_card(r: dict) -> str:
     t = w.get("targets")
     if t:
         H.append('<div class="label">Right now → target</div><table><tr><th>Shape</th><th class="num">Right now</th>'
-                 '<th class="num">Where it plays best</th><th class="num">Stuff+ gain</th></tr>')
+                 '<th class="num">Target (vs. his FB)</th><th class="num">Stuff+ gain</th></tr>')
         for row in t["rows"]:
+            if row.get("hide"):
+                continue
             cls = "in" if row["in_range"] else "out"
             fmt = {"ivb": lambda v: f"{v:+.1f}", "hb": lambda v: f"{v:+.1f}", "spin": lambda v: f"{v:,.0f}"}.get(
                 row["trait"], lambda v: f"{v:.1f}")
-            target = "already there" if row["in_range"] else row.get("target_text", "")
+            target = "already there" if row["in_range"] and not row.get("vs_fb") else row.get("target_text", "")
             gain = "–" if row["in_range"] else f'{row["gain"]:+.0f}'
             H.append(f'<tr><td>{_e(row["label"])}</td><td class="num {cls}">{fmt(row["now"])} {row["unit"]}</td>'
                      f'<td class="num">{target}</td><td class="num">{gain}</td></tr>')
@@ -320,7 +335,7 @@ def needs_work_card(r: dict) -> str:
                      f'<td class="num">{ref:.0f}%+</td><td class="num">–</td></tr>')
         H.append("</table>")
         H.append(f'<div class="note">Each trait is moved on its own across the range {_e(t["pool"])} cover, and the Stuff model '
-                 'grades every version (velocity only goes up, to +4 mph on each pitch, shown as the speed that pitch should reach; the gap off the fastball holds this pitch\'s speed and moves the fastball; spin up to 300 rpm either way). A trait is a target only if changing it is worth 5+ Stuff+; green means he\'s already '
+                 'grades every version (fastball velocity only goes up, to +4 mph; a secondary\'s velocity target moves only that pitch\'s speed with his current fastball held, harder only, except changeups and splitters, which can come off by grip; spin up to 300 rpm either way). A trait is a target only if changing it is worth 5+ Stuff+; green means he\'s already '
                  'within 2 points of its best.</div>')
         H.append(f'<p style="margin:6px 0 0"><b>The plan:</b> {_e(t["plan"])}</p>')
     else:
@@ -330,13 +345,18 @@ def needs_work_card(r: dict) -> str:
 
 
 def _target_table(t: dict, p: dict) -> str:
-    H = ['<table><tr><th>Shape</th><th class="num">Right now</th><th class="num">Where it plays best</th>'
+    H = ['<table><tr><th>Shape</th><th class="num">Right now</th><th class="num">Target (vs. his FB)</th>'
          '<th class="num">Stuff+ gain</th></tr>']
+    fb_note = None
     for row in t["rows"]:
+        if row.get("hide"):
+            continue
         cls = "in" if row["in_range"] else "out"
         fmt = {"ivb": lambda v: f"{v:+.1f}", "hb": lambda v: f"{v:+.1f}", "spin": lambda v: f"{v:,.0f}",
                "gap": lambda v: f"{-v:.1f}"}.get(row["trait"], lambda v: f"{v:.1f}")
         target = "already there" if row["in_range"] else row.get("target_text", "")
+        if row.get("vs_fb"):  # the speed range always shows; it's set off his fastball and moves with it
+            target, fb_note = row.get("target_text", ""), row["fb_velo"]
         if row["trait"] == "gap" and not row["in_range"]:
             target = target.replace(" off his fastball", " off FB")
         gain = "–" if row["in_range"] else f'{row["gain"]:+.0f}'
@@ -348,6 +368,9 @@ def _target_table(t: dict, p: dict) -> str:
         H.append(f'<tr><td>Strike %</td><td class="num {"in" if ok else "out"}">{rates["strike"]:.0f}%</td>'
                  f'<td class="num">{ref:.0f}%+</td><td class="num">–</td></tr>')
     H.append("</table>")
+    if fb_note is not None:
+        H.append(f'<p class="note" style="margin:2px 0 4px">The velocity target is set off his current {fb_note:.1f} mph '
+                 'fastball: every mph he adds to the fastball moves this range up by the same amount.</p>')
     return "".join(H)
 
 
@@ -522,7 +545,7 @@ def grades_card(r: dict) -> str:
         if p.get("comparable_mlb"):
             why += f' <span class="muted">{_e(p["comparable_mlb"]["text"])}</span>'
         H.append(f'<tr><td colspan="8" class="why">{why}</td></tr>')
-    H.append('</table><div class="note">Green is clearly above average (108+), red clearly below (92 or lower). '
+    H.append('</table><div class="note">Colors work like Baseball Savant: red is above average, blue is below, and the deeper the color the further from 100 (full color at 125 or 75). '
              'Pitch types need 10 pitches to be graded.</div></div>')
     return "".join(H)
 
