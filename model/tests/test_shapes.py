@@ -95,3 +95,25 @@ def test_consolidate_merges_label_splits_but_not_distinct_pitches():
     out = consolidate(pd.DataFrame(rows), by=["PitcherId"])
     assert set(out.loc[out["PitcherId"] == "1", "shape_family"]) == {"Four-seam"}
     assert set(out.loc[out["PitcherId"] == "2", "shape_family"]) == {"Four-seam", "Sinker"}
+
+
+def test_absorb_rare_folds_stray_labels():
+    import numpy as np
+    import pandas as pd
+    from prism_model.shapes import absorb_rare
+
+    rng = np.random.default_rng(0)
+    fb = pd.DataFrame({"shape_family": "Four-seam", "RelSpeed": rng.normal(84, 1.2, 40),
+                       "InducedVertBreak": rng.normal(16, 2, 40), "hb_arm": rng.normal(8, 2, 40)})
+    sl = pd.DataFrame({"shape_family": "Slider", "RelSpeed": rng.normal(75, 1, 20),
+                       "InducedVertBreak": rng.normal(0, 2, 20), "hb_arm": rng.normal(-8, 2, 20)})
+    stray = pd.DataFrame({"shape_family": ["Cutter", "Cutter", "Splitter", "Splitter", "Curveball"],
+                          "RelSpeed": [82.5, 83.0, 78.0, 77.5, 65.0], "InducedVertBreak": [13.0, 14.0, 5.0, 6.0, -15.0],
+                          "hb_arm": [4.0, 5.0, 10.0, 9.0, -2.0]})
+    df = pd.concat([fb, sl, stray], ignore_index=True).assign(PitcherId="A")
+    out = absorb_rare(df, ["PitcherId"])
+    tail = out["shape_family"].iloc[-5:].tolist()
+    assert tail[:2] == ["Four-seam", "Four-seam"]      # cut four-seams rejoin the four-seam
+    assert tail[2:4] == ["Changeup", "Changeup"]       # rare splitter -> changeup
+    assert tail[4] == "Curveball"                      # genuinely different pitch is left alone
+    assert out["shape_family_raw"].iloc[-5] == "Cutter"

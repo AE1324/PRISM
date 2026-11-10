@@ -317,12 +317,77 @@ def consolidate(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
     return df
 
 
+RARE_PITCHES = 10          # a pitch type with fewer than this many pitches is "rare" for that pitcher
+ABSORB_FLOOR = {"RelSpeed": 2.0, "InducedVertBreak": 3.0, "hb_arm": 3.0}
+ABSORB_MAX_Z = 3.0
+# Which of a pitcher's regular pitch groups a rare pitch may be folded into.
+ABSORB_INTO = {"Four-seam": ["Fastball"], "Sinker": ["Fastball"], "Cutter": ["Fastball", "Breaking"],
+               "Slider": ["Breaking", "Fastball"], "Curveball": ["Breaking"],
+               "Changeup": ["Offspeed"], "Splitter": ["Offspeed"]}
+
+
+def absorb_rare(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
+    """
+    Stop a handful of off pitches from showing up as a pitch the pitcher doesn't throw.
+
+    1. Each pitch of a rare type (< 10 for that pitcher) moves to the closest of his regular
+       types it could be a version of (a cutter-tagged pitch to his four-seam, a splitter to his
+       changeup) when it sits within 3 standard deviations of that pitch's velocity, ride and run
+       (floors of 2 mph and 3 in, so tight groups aren't over-strict). The tiniest leftovers (< 5)
+       get a second, looser pass (4 mph velocity floor, 3.5 SD), since one-off velocity reads vary.
+    2. A rare splitter is called a changeup (merged into his changeup if he has one): at our level
+       a low-spin offspeed pitch thrown a few times is a changeup that came out differently.
+    Rare pitches that look like nothing else he throws are left alone (shown as rarely used).
+    The original label is kept in ``shape_family_raw``.
+    """
+    df = df.copy()
+    if "shape_family_raw" not in df:
+        df["shape_family_raw"] = df["shape_family"]
+    cols = list(ABSORB_FLOOR)
+    for _, g in df[df["shape_family"].isin(ABSORB_INTO)].groupby(by):
+        counts = g["shape_family"].value_counts()
+        regular = [k for k, v in counts.items() if v >= RARE_PITCHES]
+        if not regular:
+            continue
+        stats = g[g["shape_family"].isin(regular)].groupby("shape_family")[cols].agg(["mean", "std"])
+        def nearest(row, floor):
+            best, bz = None, np.inf
+            for r in cands:
+                z = max(abs(row[c] - stats.loc[r, (c, "mean")]) /
+                        max(np.nan_to_num(stats.loc[r, (c, "std")]), floor[c]) for c in cols)
+                if z < bz:
+                    best, bz = r, z
+            return best, bz
+
+        for kind in [k for k, v in counts.items() if v < RARE_PITCHES]:
+            cands = [r for r in regular if BUCKET[r] in ABSORB_INTO[kind]]
+            left = g[(g["shape_family"] == kind) & g[cols].notna().all(axis=1)].index.tolist()
+            # First pass, then a looser pass if only a few strays are left.
+            for floor, max_z in [(ABSORB_FLOOR, ABSORB_MAX_Z), ({**ABSORB_FLOOR, "RelSpeed": 4.0}, 3.5)]:
+                if floor is not ABSORB_FLOOR and len(left) >= 5:
+                    break
+                still = []
+                for i in left:
+                    best, bz = nearest(g.loc[i], floor)
+                    if best is not None and bz <= max_z:
+                        df.loc[i, "shape_family"] = best
+                    else:
+                        still.append(i)
+                left = still
+    # Rare splitters are changeups.
+    for _, g in df[df["shape_family"] == "Splitter"].groupby(by):
+        if len(g) < RARE_PITCHES:
+            df.loc[g.index, "shape_family"] = "Changeup"
+    return df
+
+
 def classify(df: pd.DataFrame, by: list[str] | None = None, merge_splits: bool = False) -> pd.DataFrame:
     """
     Add fastball reference, ``shape_family`` and ``shape_conf`` to a PRISM-format frame.
 
     ``merge_splits`` folds near-identical pitch types within a pitcher together
-    (see ``consolidate``); used for team reports, not for MLB training data.
+    (see ``consolidate``) and folds stray one-off labels into the pitch they're a
+    version of (see ``absorb_rare``); used for team reports, not for MLB training data.
     """
     from joblib import load
 
@@ -340,6 +405,7 @@ def classify(df: pd.DataFrame, by: list[str] | None = None, merge_splits: bool =
     df.loc[knuckle, "shape_family"] = "Knuckleball"
     if merge_splits:
         df = consolidate(df, by or ["PitcherId", "Season"])
+        df = absorb_rare(df, by or ["PitcherId", "Season"])
     df["bucket"] = df["shape_family"].map(BUCKET)
     return assign_subtypes(df, by=by)
 
