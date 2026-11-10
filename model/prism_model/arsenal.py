@@ -41,7 +41,7 @@ import numpy as np
 import pandas as pd
 
 from prism_data.paths import DATA_DIR
-from prism_model import references
+from prism_model import fastball_traits, references
 from prism_model.references import RATE_COLUMNS, add_flags, num, location_score, result_values, results_score
 from prism_model.shapes import BUCKET
 from prism_model.stuff import GROUPS, aggregate, predict, to_plus
@@ -522,14 +522,20 @@ FB_ROLE = {
 }
 
 
-def fastball_role(rows: pd.DataFrame) -> dict | None:
+def fastball_role(rows: pd.DataFrame, traits: dict | None = None) -> dict | None:
     fb = rows[rows["bucket"] == "Fastball"].sort_values("n", ascending=False)
     if fb.empty:
         return None
     r = fb.iloc[0]
     key = r["subtype"] if r["shape_family"] == "Four-seam" and isinstance(r["subtype"], str) else r["shape_family"]
+    role = f"His main fastball is {FB_ROLE.get(key, key.lower())}."
+    flat = (traits is not None and traits["pitch"] == r["shape_family"]
+            and traits["vaa_ae_pct_mlb"] >= fastball_traits.HIGH)
+    if flat and key == "Flat":
+        role = ("His main fastball is a four-seam without much carry, but his release gives it a flat approach angle, "
+                "so it still plays at the top of the zone.")
     return {"pitch": r["shape_family"], "subtype": key, "velo": _num(r["velo"]), "ivb": _num(r["ivb"]),
-            "hb_arm": _num(r["hb"]), "role": f"His main fastball is {FB_ROLE.get(key, key.lower())}."}
+            "hb_arm": _num(r["hb"]), "role": role}
 
 
 # --------------------------------------------------------------------------
@@ -541,7 +547,8 @@ def stuff_label(x) -> str:
     return "above-average" if x >= 105 else "average" if x >= 95 else "below-average"
 
 
-def development(p: pd.DataFrame, rows: pd.DataFrame, judged: dict, sit: dict, staff: pd.DataFrame) -> dict:
+def development(p: pd.DataFrame, rows: pd.DataFrame, judged: dict, sit: dict, staff: pd.DataFrame,
+                traits: dict | None = None) -> dict:
     g = rows[rows["stuff"].notna()]
     w_stuff = float(np.average(g["stuff"], weights=g["n"])) if not g.empty else None
     loc = rows[rows["location"].notna()]
@@ -611,6 +618,11 @@ def development(p: pd.DataFrame, rows: pd.DataFrame, judged: dict, sit: dict, st
                 tip += f" — his {best[0].lower()} goes for strikes {100 * best[1]:.0f}% of the time"
             priorities.append((2, tip + "."))
 
+    if traits:
+        makes += traits["strengths"]
+        holding += traits["limits"]
+        priorities += [(2.5, f) for f in traits["fixes"]]
+
     no_job = [k for k, v in judged.items() if v["verdict"] == "No clear job yet"]
     if no_job:
         holding.append(f"Pitches not doing a job yet: {', '.join(no_job)}")
@@ -658,10 +670,27 @@ def summary_sentence(name: str, dev: dict, judged: dict, rows: pd.DataFrame) -> 
 # --------------------------------------------------------------------------
 # Putting it together
 # --------------------------------------------------------------------------
+def _fb_setup(df: pd.DataFrame) -> tuple[dict | None, tuple[float, float] | None, pd.DataFrame | None]:
+    """Fastball-trait model, this data's VAA calibration, and the D3 velocity scale (each optional)."""
+    model = fastball_traits.load()
+    if model is None:
+        return None, None, None
+    fb = fastball_traits._fastballs(df)
+    offset = fastball_traits.calibrate(fb) if len(fb) >= 200 else model["offset_statcast"]
+    scale_path = DATA_DIR / "models" / "d3_fb_velo_scale.csv"
+    d3 = pd.read_csv(scale_path) if scale_path.exists() else None
+    return model, offset, d3
+
+
 def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | None = None,
-            scale: str = "group", pitchers: list[str] | None = None) -> list[dict]:
-    """Reports for every pitcher in a classified PRISM-format frame (see ``build_reports`` for raw files)."""
+            scale: str = "group", pitchers: list[str] | None = None,
+            heights: dict | None = None) -> list[dict]:
+    """
+    Reports for every pitcher in a classified PRISM-format frame (see ``build_reports`` for raw files).
+    ``heights`` maps pitcher name to height in feet (used to judge whether extension is short for his size).
+    """
     df = prepare(df[df["shape_family"].notna()], ref)
+    fb_model, fb_offset, d3_scale = _fb_setup(df)
     rows = grade_rows(df, ref, models, scale)
     middle = df[df["located"]].groupby(["PitcherId", "shape_family"])["middle"].mean().rename("middle").reset_index()
     rows = rows.merge(middle, on=["PitcherId", "shape_family"], how="left")
@@ -721,7 +750,11 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
             pitches.append(entry)
 
         sit = situations(p, ref)
-        dev = development(p, prow, judged, sit, df)
+        traits = None
+        if fb_model is not None:
+            h = (heights or {}).get(p["Pitcher"].iloc[0])
+            traits = fastball_traits.traits(p, fb_model, fb_offset, h, d3_scale)
+        dev = development(p, prow, judged, sit, df, traits)
         report = {
             "pitcher": name, "pitcher_id": str(pid), "throws": p["PitcherThrows"].iloc[0],
             "team": p["PitcherTeam"].dropna().iloc[0] if "PitcherTeam" in p and p["PitcherTeam"].notna().any() else None,
@@ -731,7 +764,8 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
             "development": dev,
             "pitch_by_pitch": pitches,
             "situations": sit,
-            "fastball_role": fastball_role(prow),
+            "fastball_role": fastball_role(prow, traits),
+            "fastball_traits": traits,
             "movement_profile": movement_profile(p, prow),
             "progress": progress(p, prow, ref, models, scale),
         }
@@ -843,6 +877,19 @@ def to_markdown(r: dict) -> str:
 
     if r.get("fastball_role"):
         L += ["", "## Fastball", "", r["fastball_role"]["role"]]
+    t = r.get("fastball_traits")
+    if t:
+        line = (f"- **Velocity:** {t['velo']} mph actual, {t['perceived_velo']} perceived "
+                f"({t['extension_ft']} ft extension, {t['extension_bonus_mph']:+.1f} mph)")
+        if t.get("velo_pct_d3") is not None:
+            line += (f" — {fastball_traits.ordinal(t['velo_pct_d3'])} → "
+                     f"{fastball_traits.ordinal(t['perceived_pct_d3'])} percentile among D3 pitchers")
+        L += ["" if not r.get("fastball_role") else "", line,
+              f"- **Approach angle:** {t['vaa']}° at an average plate height of {t['avg_plate_height_ft']} ft; "
+              f"{t['vaa_above_expected']:+.2f}° vs expected for his velocity and location "
+              f"({fastball_traits.ordinal(t['vaa_ae_pct_mlb'])} percentile vs MLB, higher = flatter)"]
+        if t.get("expected_extension_ft"):
+            L.append(f"- **Extension vs size:** {t['extension_ft']} ft; about {t['expected_extension_ft']} ft is typical for his height")
     L += ["", "## Movement profile", "",
           "| Pitch | Velo (max) | IVB | HB (arm +) | Spin | Tilt | VAA | Rel H | Rel S | Ext |", "|---|---|---|---|---|---|---|---|---|---|"]
     for m in r["movement_profile"]:
