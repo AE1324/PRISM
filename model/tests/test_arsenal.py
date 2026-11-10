@@ -13,7 +13,8 @@ from prism_model.references import add_flags, result_values
 # --------------------------------------------------------------------------
 def test_pitch_plus_matches_garnet_sweeper_example():
     # Case study: Stuff 99, Location 95 -> projected 97; Results 88 over 41 game pitches -> 90.
-    assert round(pitch_plus(99, 95, 88, 41)) == 90
+    assert round(pitch_plus(99, 95, 88, 41, k=15)) == 90  # Garnet's case-study example
+    assert round(pitch_plus(99, 95, 88, 41)) == 97  # PRISM's evidence-based weight
 
 
 def test_pitch_plus_without_games_is_the_projection():

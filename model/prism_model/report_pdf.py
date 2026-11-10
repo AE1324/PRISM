@@ -98,6 +98,12 @@ td.in {{ color: #1f6b40; font-weight: 700; }} td.out {{ color: {CRIMSON}; font-w
 .plan {{ font-size: 9.6pt; }}
 .pcard {{ border: 1px solid #e3dede; border-left: 4px solid #999; border-radius: 6px; padding: 9px 12px; margin: 8px 0; break-inside: avoid; }}
 .pcard .hd {{ font-size: 7.6pt; letter-spacing: 1.2px; font-weight: 700; color: #666; text-transform: uppercase; }}
+.pcard {{ position: relative; }}
+.pcard .ppb {{ position: absolute; top: 8px; right: 10px; text-align: center; border-radius: 6px; padding: 3px 9px 4px; min-width: 52px; }}
+.pcard .ppb .v {{ font-size: 17pt; font-weight: 800; line-height: 1.05; }}
+.pcard .ppb .l {{ font-size: 6.4pt; letter-spacing: 1px; font-weight: 700; text-transform: uppercase; }}
+.pcard .ppb .c {{ font-size: 6.2pt; color: #666; margin-top: 1px; white-space: nowrap; }}
+.pcard .hd, .pcard > .note:first-of-type, .pcard > .job {{ padding-right: 120px; }}
 .pcard .job {{ font-weight: 700; margin: 4px 0 2px; }}
 .pcard p {{ margin: 3px 0; }}
 .rbox {{ background: #f6eeef; border-radius: 6px; padding: 7px 10px; margin: 7px 0 3px; }}
@@ -345,6 +351,20 @@ def _target_table(t: dict, p: dict) -> str:
     return "".join(H)
 
 
+def _pp_badge(g: dict) -> str:
+    """Pitch+ in the top right of a pitch card, tinted by tier, with its three inputs underneath."""
+    v = g.get("pitch_plus")
+    if not isinstance(v, (int, float)):
+        return ('<div class="ppb" style="background:#f3f1f1;color:#888"><div class="l">Pitch+</div>'
+                '<div class="v">N/A</div></div>')
+    bg, fg = (("#e3f1e6", "#1f6b35") if v >= 110 else ("#eef4ef", "#2f6b3f") if v >= 100
+              else ("#fbeeee", "#9c2a2a") if v < 90 else ("#f8f1ee", "#8a4b3a"))
+    parts = [f"{k} {g.get(c)}" for k, c in (("Stuff", "stuff_plus"), ("Loc", "location_plus"), ("Res", "results_plus"))
+             if g.get(c) not in (None, "N/A")]
+    return (f'<div class="ppb" style="background:{bg};color:{fg}"><div class="l">Pitch+</div>'
+            f'<div class="v">{v:.0f}</div><div class="c">{" · ".join(parts)}</div></div>')
+
+
 def pitch_cards(r: dict) -> str:
     """One card per pitch: its job, the evidence, what the research says, spin axis, whiff vs contact version."""
     H = ['<div><div class="sub" style="margin:0 0 4px">From his fall outings. A pitch has a job when '
@@ -356,8 +376,9 @@ def pitch_cards(r: dict) -> str:
         sh = p.get("shape") or {}
         H.append(f'<div class="pcard" style="border-left-color:{col}"><div class="hd"><span class="dot" style="background:{col}">'
                  f'</span>{_e(p["pitch"])}{_e(sub)} <span class="pill {VERDICT_TONE.get(p.get("verdict", ""), "muted")}">'
-                 f'{_e(str(p.get("verdict", "")).lower())}</span> <span style="font-weight:400;letter-spacing:0">Pitch+ '
-                 f'{_e(p["grades"]["pitch_plus"])} · {p["n"]} thrown, {p["game_pitches"]} vs hitters</span></div>')
+                 f'{_e(str(p.get("verdict", "")).lower())}</span> <span style="font-weight:400;letter-spacing:0">'
+                 f'{p["n"]} thrown, {p["game_pitches"]} vs hitters</span></div>')
+        H.append(_pp_badge(p["grades"]))
         if not isinstance(p["grades"]["pitch_plus"], (int, float)):
             H.append(f'<p>{_e(p.get("so", ""))}</p></div>')
             continue
@@ -492,7 +513,8 @@ def grades_card(r: dict) -> str:
             continue
         why = (f"<b>Pitch+ {g['pitch_plus']}:</b> built like a {_e(g['stuff_plus'])} (Stuff), located like a "
                f"{_e(g['location_plus'])}, plays like a {_e(g['results_plus'])} in games. With {p['game_pitches']} game "
-               f"pitches, results count for {p.get('results_weight', 0)}% of it.")
+               f"pitches, results count for {p.get('results_weight', 0)}% of it (game results take a few hundred pitches to "
+               f"mean much; location is also weighed by how much data is behind it).")
         parts = p.get("stuff_parts")
         if parts:
             why += (f" <b>Stuff {_e(g['stuff_plus'])}</b> vs a typical {p['pitch'].lower()}: " +

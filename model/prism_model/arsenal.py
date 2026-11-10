@@ -52,7 +52,17 @@ MIN_TYPE_PITCHES = 10       # a pitch type needs this many to be graded
 MIN_LOCATED = 10            # located pitches needed for a Location grade
 MIN_SESSION_PITCHES = 5     # per outing, for Progress
 MIN_PEERS = 4               # pitch types needed to set a 100 scale
-RESULTS_K = 15              # Pitch+ trusts Results n / (n + 15)
+# Pitch+ trusts Results n / (n + RESULTS_K). Garnet used 15, but results are mostly noise at fall sample sizes:
+# on Oberlin's data the spread in Results across pitch types (3.5 RV/100) is all binomial-style noise (3.6), and on
+# MLB pitcher-season rows a pitch type's results are half signal at ~770 game pitches. So Results only take over
+# once there's a real sample (6% at 50 game pitches, ~25% over a full season of ~250).
+RESULTS_K = 770
+# Location is mostly noise at fall sample sizes: on Oberlin's data the spread in pitch-type location is 8.6 pts,
+# 8.2 of which is binomial noise (true spread ~2.5, same as MLB). So location is regressed in two steps:
+# pitcher command toward the staff (counts half at LOC_K_PITCHER located pitches, from the Oberlin talent spread
+# of ~2.9 pts), then each pitch type toward his command (counts half at LOC_K_TYPE, from MLB pitcher-season rows).
+LOC_K_PITCHER = 300
+LOC_K_TYPE = 400
 FADE_AFTER = 25
 MIN_GAME_FOR_VERDICT = 15
 CLIP = (40.0, 160.0)
@@ -218,6 +228,32 @@ def d3_stuff(rows: pd.DataFrame, models: dict | None, d3ref: dict | None,
     return rows
 
 
+def regress_location(rows: pd.DataFrame, ref: dict) -> pd.DataFrame:
+    """
+    Replace each row's raw location with a sample-size-regressed one (raw kept in ``location_raw``).
+
+    Works in deviations from the MLB mean for the pitch type. Staff offset = located-pitch-weighted mean
+    deviation; pitcher command = staff + n/(n+LOC_K_PITCHER) x (his deviation - staff); pitch type =
+    pitcher + n/(n+LOC_K_TYPE) x (its deviation - pitcher). A 20-pitch slider thrown well in the zone barely
+    moves off his overall command; it takes a few hundred pitches for a pitch's own location to count fully.
+    """
+    rows = rows.copy()
+    rows["location_raw"] = rows["location"]
+    mean = rows["shape_family"].map(lambda f: ref["scale"].get(f, {}).get("location_mean", np.nan))
+    dev = rows["location"] - mean
+    n = rows["n_located"].where(dev.notna(), 0).astype(float)
+    if n.sum() == 0:
+        return rows
+    staff = float(np.nansum(dev * n) / n.sum())
+    by_p = pd.DataFrame({"p": rows["PitcherId"], "x": (dev * n).fillna(0), "n": n}).groupby("p")[["x", "n"]].sum()
+    raw_p = (by_p["x"] / by_p["n"].replace(0, np.nan)).fillna(staff)
+    cmd = staff + by_p["n"] / (by_p["n"] + LOC_K_PITCHER) * (raw_p - staff)
+    pc = rows["PitcherId"].map(cmd)
+    rows["location"] = mean + pc + n / (n + LOC_K_TYPE) * (dev - pc)
+    rows["location"] = rows["location"].where(dev.notna())
+    return rows
+
+
 def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d3",
                d3ref: dict | None = None) -> pd.DataFrame:
     """One row per pitcher pitch type with Stuff, Shape, Location, Results and Pitch+."""
@@ -228,6 +264,7 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
     rows = rows.merge(location_score(df, by), on=by, how="left").merge(results_score(df, by), on=by, how="left")
     rows["n_located"] = rows["n_located"].fillna(0).astype(int)
     rows["n_game"] = rows["n_game"].fillna(0).astype(int)
+    rows = regress_location(rows, ref)
     rows["usage"] = rows["n"] / rows.groupby("PitcherId")["n"].transform("sum")
 
     sc = ref["scale"]
