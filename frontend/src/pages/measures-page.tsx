@@ -1,126 +1,274 @@
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { FACTORS, SiteFooter, SiteNav, SitePage } from "@/features/site/site-shell";
+import { FACTORS, SITE, SiteFooter, SiteNav, SitePage } from "@/features/site/site-shell";
 
-const DETAILS: Record<string, { desc: string; inputs: string; example: number }> = {
-  velocity: {
-    desc: "How fast the pitch gets to the hitter. PRISM uses perceived velocity, which adjusts for extension, since a pitch released closer to the plate plays faster than the radar reading.",
-    inputs: "release speed, extension",
-    example: -2,
-  },
-  movement: {
-    desc: "How the pitch breaks and how far it separates from the fastball. Secondary pitches are judged on their difference from the pitcher’s own fastball, not on raw break alone.",
-    inputs: "induced vertical break, horizontal break, velo and break differentials",
-    example: 7,
-  },
-  spin: {
-    desc: "How much the ball spins and how efficiently that spin turns into movement.",
-    inputs: "spin rate, spin efficiency, spin axis",
-    example: 3,
-  },
-  release: {
-    desc: "Where the ball comes out and the angle it arrives at the plate. A flatter approach angle helps a fastball play up, and a secondary released far from the fastball is easier to pick up.",
-    inputs: "release height, release side, vertical approach angle",
-    example: 1,
-  },
-  command: {
-    desc: "Whether the pitch lands where it needs to. Command is graded from game and live-at-bat data, separately from the physical traits above.",
-    inputs: "strike rate, competitive rate, middle-middle rate",
-    example: -5,
-  },
-};
+const DISPLAY = "font-['Space_Grotesk',system-ui,sans-serif]";
+const MONO = "font-['IBM_Plex_Mono',ui-monospace,monospace]";
+const LINE = "border-[rgba(237,240,244,0.08)]";
 
-const signed = (v: number) => (v > 0 ? `+${v}` : v < 0 ? `−${Math.abs(v)}` : "0");
+/** Savant-style grade shading used across PRISM (100 = average; red above, blue below). */
+function gradeBg(v: number) {
+  const t = Math.max(-1, Math.min(1, (v - 100) / 25));
+  const mid = [46, 51, 59], end = t > 0 ? [210, 45, 73] : [50, 90, 165];
+  const k = Math.pow(Math.abs(t), 0.8);
+  return `rgb(${mid.map((m, i) => Math.round(m + k * (end[i] - m))).join(",")})`;
+}
 
-/** Diverging bar: negative values grow left of center, positive values right. */
-function ContributionBar({ value, color }: { value: number; color: string }) {
-  const width = `${Math.min(100, Math.abs(value) * 10)}%`;
+function Grade({ v, size = "md" }: { v: number; size?: "md" | "lg" }) {
   return (
-    <div className="flex h-2.5 rounded-[5px] bg-[rgba(237,240,244,0.06)]">
-      <div className="flex flex-1 justify-end border-r border-[rgba(237,240,244,0.35)]">
-        {value < 0 && <div className="h-2.5 rounded-[5px]" style={{ width, background: color }} />}
-      </div>
-      <div className="flex flex-1 justify-start">
-        {value > 0 && <div className="h-2.5 rounded-[5px]" style={{ width, background: color }} />}
-      </div>
-    </div>
+    <span
+      className={`inline-flex items-center justify-center rounded-lg font-semibold text-white ${DISPLAY} ${size === "lg" ? "h-14 min-w-[84px] px-3 text-[30px]" : "h-8 min-w-[52px] px-2 text-base"}`}
+      style={{ background: gradeBg(v) }}
+    >
+      {v}
+    </span>
   );
 }
 
+function Eyebrow({ children }: { children: ReactNode }) {
+  return <p className="m-0 mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#9AA3B1]">{children}</p>;
+}
+
+function Block({ id, eyebrow, title, intro, children }: { id: string; eyebrow: string; title: string; intro: ReactNode; children: ReactNode }) {
+  return (
+    <section id={id} className={`scroll-mt-6 border-t ${LINE} py-16`}>
+      <div className="flex flex-wrap gap-x-16 gap-y-8">
+        <div className="min-w-0 flex-[0_1_330px]">
+          <Eyebrow>{eyebrow}</Eyebrow>
+          <h2 className={`m-0 mb-4 text-[32px] font-semibold leading-[1.12] tracking-[-0.01em] ${DISPLAY}`}>{title}</h2>
+          <div className="text-[16px] leading-[1.7] text-[#B3BAC5]">{intro}</div>
+        </div>
+        <div className="min-w-0 flex-[1_1_520px]">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- the grades ---------- */
+const GRADES = [
+  { name: "Stuff+", q: "How good is the pitch itself?", body: "Velocity, movement, spin and release, graded on how many runs pitches built like this one give up. Nothing about where it was thrown or what happened.", from: "Pitch tracking only" },
+  { name: "Shape+", q: "How good is the design, ignoring speed?", body: "Stuff+ with velocity taken out. It separates a well-shaped pitch from one that's carried by arm speed, and shows what a pitch could become as velocity comes.", from: "Pitch tracking only" },
+  { name: "Location+", q: "Does he put it where it needs to go?", body: "How often the pitch lands in the competitive zone (the edges and the zone) while staying out of the middle. It's weighed by how much data is behind it.", from: "Plate location" },
+  { name: "Results+", q: "What has it actually done in games?", body: "The run value of every pitch thrown against hitters: balls, strikes, whiffs and how hard the ball was hit when it was put in play.", from: "Live at-bats" },
+];
+
+/* ---------- jobs ---------- */
+const JOBS = [
+  ["Strike pitch", "Lands strikes at a clearly higher rate"],
+  ["Whiff pitch", "Gets swings and misses"],
+  ["Called-strike pitch", "Steals strikes without a swing"],
+  ["Chase pitch", "Gets hitters to swing out of the zone"],
+  ["Weak-contact pitch", "Limits hard contact"],
+  ["Ground-ball pitch", "Keeps the ball on the ground"],
+  ["Putaway pitch", "Finishes hitters with two strikes"],
+];
+
+const VERDICTS = [
+  { label: "Working", color: "#3CCF7A", text: "It has a clear job and nothing is going wrong. It's never told to change: it gets add-ons to try, not fixes." },
+  { label: "Struggling", color: "#F0566A", text: "It has a deal-breaker: it isn't landing strikes or it's getting hit hard. The card says which and by how much." },
+  { label: "No clear job yet", color: "#F2B33D", text: "Nothing it does is clearly better than average yet. The card shows the shape changes that would give it one." },
+  { label: "Too few game pitches", color: "#F2B33D", text: "Fewer than 15 pitches against hitters. It's graded on its traits, but PRISM won't call it working or struggling yet." },
+];
+
+const DETAILS: Record<string, { desc: string; inputs: string }> = {
+  velocity: { desc: "How fast the pitch gets to the hitter. PRISM uses perceived velocity: a pitcher who releases the ball a foot closer to the plate gets about 1.6 mph of extra effective speed.", inputs: "release speed, extension" },
+  movement: { desc: "How the ball breaks, and for every pitch that isn't a fastball, how far it separates from his own fastball in speed and movement. A changeup is judged on the gap it creates, not on raw break alone.", inputs: "induced vertical break, horizontal break, velo / IVB / HB off the fastball" },
+  spin: { desc: "How hard the ball spins and which way. Spin direction is shown as a clock face, and for some pitch types the research shows which direction plays better.", inputs: "spin rate, spin axis" },
+  release: { desc: "Where the ball comes out of the hand. For fastballs, release height and width change how the pitch arrives at the plate and how it plays.", inputs: "release height, release side" },
+  command: { desc: "Whether the pitch lands where it needs to. Command is its own grade (Location+), kept separate from the physical traits above so a nasty pitch that isn't commanded yet still shows as nasty.", inputs: "plate location: competitive zone and middle" },
+};
+
 export default function MeasuresPage() {
-  const total = FACTORS.reduce((sum, f) => sum + DETAILS[f.key].example, 0);
+  const example = { stuff: 121, loc: 95, res: 122, n: 27 };
+  const resW = example.n / (example.n + 770);
+  const pp = Math.round((example.stuff + example.loc) / 2 + resW * (example.res - (example.stuff + example.loc) / 2));
 
   return (
     <SitePage>
       <SiteNav />
 
-      <section className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-14 px-6 pt-20 pb-16">
-        <div className="min-w-0 flex-[1_1_420px]">
-          <h1 className="m-0 mb-5 font-['Space_Grotesk',system-ui,sans-serif] text-5xl font-semibold leading-[1.08] tracking-[-0.01em]">
-            One grade, five components.
+      {/* ---------- hero ---------- */}
+      <section className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center gap-14 px-6 pt-20 pb-16">
+        <div className="min-w-0 flex-[1_1_440px]">
+          <Eyebrow>What it measures</Eyebrow>
+          <h1 className={`m-0 mb-5 text-5xl font-semibold leading-[1.06] tracking-[-0.015em] ${DISPLAY}`}>
+            Every pitch, split into the parts that make it work.
           </h1>
-          <p className="m-0 mb-4 text-[17px] leading-[1.65] text-[#B3BAC5]">
-            A prism splits white light into the colors that make it up. PRISM does the same with a pitch grade: it
-            shows how many points each part of the pitch adds or takes away.
+          <p className="m-0 mb-4 text-[17px] leading-[1.7] text-[#B3BAC5]">
+            A prism splits white light into its colors. PRISM does the same with a pitch: it pulls apart how the pitch is
+            built, where it's thrown and what it does in games, grades each one, and tells the pitcher what to work on next.
           </p>
-          <p className="m-0 text-[17px] leading-[1.65] text-[#B3BAC5]">
-            Each component keeps its color on every page, for every pitcher.
+          <p className="m-0 text-[17px] leading-[1.7] text-[#B3BAC5]">
+            Every grade is on the same scale: <span className="text-[#EDF0F4]">100 is average</span> for the level he's
+            pitching at, and every 10 points is one standard deviation.
           </p>
         </div>
 
-        <div className="min-w-0 flex-[1_1_440px] rounded-2xl border border-[rgba(237,240,244,0.1)] bg-[#151A21] p-7">
-          <div className="mb-[26px] flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0 flex-[1_1_440px] rounded-2xl border border-[rgba(237,240,244,0.1)] p-7" style={{ background: SITE.surface }}>
+          <div className="mb-6 flex items-start justify-between gap-4">
             <div>
-              <p className="m-0 mb-1 font-['Space_Grotesk',system-ui,sans-serif] text-[22px] font-semibold">Slider</p>
-              <p className="m-0 text-sm text-[#9AA3B1]">Example pitch · 74.5 mph</p>
+              <p className={`m-0 mb-1 text-[22px] font-semibold ${DISPLAY}`}>Slider · Sweeper</p>
+              <p className="m-0 text-sm text-[#9AA3B1]">Example pitch · 77 mph · {example.n} pitches vs hitters</p>
             </div>
             <div className="text-right">
-              <p className="m-0 text-[13px] text-[#9AA3B1]">Stuff+</p>
-              <p className="m-0 font-['JetBrains_Mono',ui-monospace,monospace] text-[40px] font-medium leading-none">{100 + total}</p>
+              <p className="m-0 mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9AA3B1]">Pitch+</p>
+              <Grade v={pp} size="lg" />
             </div>
           </div>
-          <div className="flex flex-col gap-3.5">
-            {FACTORS.map((f) => {
-              const v = DETAILS[f.key].example;
-              return (
-                <div key={f.key} className="grid grid-cols-[92px_minmax(0,1fr)_36px] items-center gap-3.5">
-                  <span className="text-sm">{f.name}</span>
-                  <ContributionBar value={v} color={f.color} />
-                  <span className="text-right font-['JetBrains_Mono',ui-monospace,monospace] text-sm" style={{ color: f.color }}>
-                    {signed(v)}
-                  </span>
+          <div className="flex flex-col gap-3">
+            {[
+              ["Stuff+", example.stuff, "How it's built"],
+              ["Location+", example.loc, "Where it's thrown"],
+              ["Results+", example.res, `What it's done (${Math.round(resW * 100)}% weight so far)`],
+            ].map(([k, v, d]) => (
+              <div key={k as string} className={`flex items-center justify-between gap-3 rounded-xl border ${LINE} px-4 py-3`}>
+                <div>
+                  <p className="m-0 text-[15px] font-medium">{k}</p>
+                  <p className="m-0 text-[13px] text-[#9AA3B1]">{d}</p>
                 </div>
-              );
-            })}
+                <Grade v={v as number} />
+              </div>
+            ))}
           </div>
+          <p className="m-0 mt-5 text-[13px] leading-relaxed text-[#9AA3B1]">
+            Pitch+ starts from the average of Stuff+ and Location+. Results only take over once there's enough of a game
+            sample to trust them.
+          </p>
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-[1200px] px-6 pb-24">
-        <div className="border-t border-[rgba(237,240,244,0.08)]">
-          {FACTORS.map((f) => (
-            <div
-              key={f.key}
-              className="flex flex-wrap gap-x-14 gap-y-6 border-b border-[rgba(237,240,244,0.08)] py-9"
-            >
-              <div className="flex min-w-0 flex-[0_1_260px] items-center gap-3.5">
-                <span className="h-9 w-1 rounded-sm" style={{ background: f.color }} />
-                <h2 className="m-0 font-['Space_Grotesk',system-ui,sans-serif] text-[26px] font-semibold">{f.name}</h2>
+      <div className="mx-auto w-full max-w-[1200px] px-6 pb-12">
+        {/* ---------- the grades ---------- */}
+        <Block id="grades" eyebrow="01 · The grades" title="Four questions about every pitch"
+          intro={<>Each grade answers one question, from one kind of data. Keeping them apart is what lets PRISM say <i>why</i> a pitch is working or not, instead of handing back a single number.</>}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
+            {GRADES.map((g) => (
+              <div key={g.name} className={`rounded-2xl border ${LINE} p-5`} style={{ background: SITE.surface }}>
+                <p className={`m-0 mb-1 text-xl font-semibold ${DISPLAY}`}>{g.name}</p>
+                <p className="m-0 mb-3 text-[15px] text-[#EDF0F4]">{g.q}</p>
+                <p className="m-0 mb-4 text-sm leading-relaxed text-[#B3BAC5]">{g.body}</p>
+                <p className="m-0 text-xs uppercase tracking-[0.12em] text-[#7D8694]">{g.from}</p>
               </div>
-              <div className="min-w-0 flex-[1_1_360px]">
-                <p className="m-0 mb-3.5 text-base leading-[1.65] text-[#C2C8D1]">{DETAILS[f.key].desc}</p>
-                <p className="m-0 text-sm text-[#8A93A1]">
-                  Inputs: <span className="font-['JetBrains_Mono',ui-monospace,monospace] text-[#B3BAC5]">{DETAILS[f.key].inputs}</span>
-                </p>
+            ))}
+          </div>
+          <div className={`mt-3 rounded-2xl border ${LINE} p-5`} style={{ background: SITE.surface }}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className={`m-0 mb-1 text-xl font-semibold ${DISPLAY}`}>Pitch+</p>
+                <p className="m-0 text-[15px] text-[#EDF0F4]">The one-number summary.</p>
               </div>
+              <code className={`rounded-lg px-3 py-2 text-[13px] text-[#C2C8D1] ${MONO}`} style={{ background: SITE.bg }}>
+                Pitch+ = avg(Stuff+, Location+) → Results+ by n ÷ (n + 770)
+              </code>
             </div>
-          ))}
-        </div>
-      </section>
+            <p className="m-0 mt-3 text-sm leading-relaxed text-[#B3BAC5]">
+              With 50 game pitches, results are 6% of the grade; over a full season of about 250, closer to 25%. Early on,
+              a pitch is judged mostly on what it is, not on a handful of outcomes.
+            </p>
+          </div>
+        </Block>
+
+        {/* ---------- what goes into stuff ---------- */}
+        <Block id="components" eyebrow="02 · Inside the grade" title="What goes into a pitch"
+          intro={<>Each component keeps its color across PRISM. On a pitcher's page, the Stuff grade is broken down into these parts so you can see which ones are adding points and which are costing them.</>}>
+          <div className={`border-t ${LINE}`}>
+            {FACTORS.map((f) => (
+              <div key={f.key} className={`flex flex-wrap gap-x-10 gap-y-3 border-b ${LINE} py-6`}>
+                <div className="flex min-w-0 flex-[0_1_170px] items-center gap-3">
+                  <span className="h-8 w-1 rounded-sm" style={{ background: f.color }} />
+                  <h3 className={`m-0 text-[22px] font-semibold ${DISPLAY}`}>{f.key === "command" ? "Command" : f.name}</h3>
+                </div>
+                <div className="min-w-0 flex-[1_1_320px]">
+                  <p className="m-0 mb-2 text-[15px] leading-[1.65] text-[#C2C8D1]">{DETAILS[f.key].desc}</p>
+                  <p className="m-0 text-[13px] text-[#8A93A1]">Inputs: <span className={`text-[#B3BAC5] ${MONO}`}>{DETAILS[f.key].inputs}</span></p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Block>
+
+        {/* ---------- jobs and verdicts ---------- */}
+        <Block id="jobs" eyebrow="03 · Jobs and verdicts" title="Every pitch needs a job"
+          intro={<>Grades say how good a pitch is. Jobs say what it's <i>for</i>. A pitch earns a job when it's clearly better than average at one of seven things, measured against Division III pitchers for strikes and whiffs and against his own staff for the rest.</>}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-2.5">
+            {JOBS.map(([j, d]) => (
+              <div key={j} className={`rounded-xl border ${LINE} px-4 py-3.5`} style={{ background: SITE.surface }}>
+                <p className="m-0 text-[15px] font-medium">{j}</p>
+                <p className="m-0 text-[13px] text-[#9AA3B1]">{d}</p>
+              </div>
+            ))}
+          </div>
+          <p className="m-0 mt-8 mb-3 text-[15px] text-[#EDF0F4]">Each pitch also gets a verdict:</p>
+          <div className="flex flex-col gap-2.5">
+            {VERDICTS.map((v) => (
+              <div key={v.label} className={`flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-xl border ${LINE} px-4 py-3.5`} style={{ background: SITE.surface }}>
+                <span className="w-[190px] flex-none text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: v.color }}>{v.label}</span>
+                <span className="min-w-0 flex-[1_1_300px] text-sm leading-relaxed text-[#B3BAC5]">{v.text}</span>
+              </div>
+            ))}
+          </div>
+        </Block>
+
+        {/* ---------- fastball ---------- */}
+        <Block id="fastball" eyebrow="04 · The fastball" title="Traits that change how a fastball plays"
+          intro={<>A fastball's grade comes from the model, but three traits get called out on their own because they explain a lot and can be trained. PRISM only highlights them when they're unusual, good or bad.</>}>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
+            {[
+              ["Perceived velocity", "Radar speed adjusted for extension. 88 mph released a foot closer to the plate plays like about 89.6.", "Velocity is graded against Division III: his fastball's D3 percentile sets how it grades."],
+              ["Extension", "How far down the mound he releases the ball. PRISM compares it to what's typical for his height, so short extension from a tall pitcher reads as mechanical, not size.", "Each half foot gained plays like about 0.8 mph."],
+              ["Approach angle", "How flat or steep the fastball arrives, compared to what's expected for his release, speed and where the pitch crossed the plate.", "A flat four-seam up in the zone misses bats; a steep or flat sinker is flagged too."],
+            ].map(([t, a, b]) => (
+              <div key={t} className={`rounded-2xl border ${LINE} p-5`} style={{ background: SITE.surface }}>
+                <p className={`m-0 mb-2 text-lg font-semibold ${DISPLAY}`}>{t}</p>
+                <p className="m-0 mb-3 text-sm leading-relaxed text-[#B3BAC5]">{a}</p>
+                <p className="m-0 text-[13px] leading-relaxed text-[#9AA3B1]">{b}</p>
+              </div>
+            ))}
+          </div>
+        </Block>
+
+        {/* ---------- reading a card ---------- */}
+        <Block id="reading" eyebrow="05 · Reading a pitch card" title="Targets, the spin clock and the colors"
+          intro={<>Every pitch card ends in something to do. Targets come from the same model that grades the pitch, so a target is only shown when the research says the change is worth it.</>}>
+          <div className={`overflow-x-auto rounded-2xl border ${LINE}`} style={{ background: SITE.surface }}>
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-[0.12em] text-[#9AA3B1]">
+                  <th className="px-5 py-3 font-semibold">Trait</th><th className="px-3 py-3 text-right font-semibold">Now</th>
+                  <th className="px-3 py-3 text-right font-semibold">Target (vs. his FB)</th><th className="px-5 py-3 text-right font-semibold">Stuff+ gain</th>
+                </tr>
+              </thead>
+              <tbody className={MONO}>
+                {[
+                  ["Velocity", "73.7 mph", "76.2–78.2 mph", "+16", false],
+                  ["IVB (ride +)", "+1.6 in", "on target", "–", true],
+                  ["Spin", "2,375 rpm", "2,575 rpm or more", "+7", false],
+                ].map(([t, n, g, s, ok]) => (
+                  <tr key={t as string} className={`border-t ${LINE}`}>
+                    <td className="px-5 py-3 font-['Inter',system-ui,sans-serif]">{t}</td>
+                    <td className="px-3 py-3 text-right" style={{ color: ok ? "#3CCF7A" : "#F0566A" }}>{n}</td>
+                    <td className="px-3 py-3 text-right text-[#C2C8D1]">{g}</td>
+                    <td className="px-5 py-3 text-right">{s}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="m-0 mt-5 flex list-none flex-col gap-3 p-0 text-[15px] leading-relaxed text-[#B3BAC5]">
+            <li><span className="text-[#EDF0F4]">Green means on target, red means there's a gain to be had.</span> A change only becomes a target if it's worth at least 5 Stuff+.</li>
+            <li><span className="text-[#EDF0F4]">Velocity targets for secondary pitches are set off his current fastball.</span> As the fastball gets faster, the range moves up with it. PRISM never asks a pitcher to throw slower, except a changeup that sits too close to the fastball, and then only through the grip.</li>
+            <li><span className="text-[#EDF0F4]">Spin axis is shown as a clock face</span> (12:00 is pure backspin, mirrored for lefties). When the research shows a direction plays better for that pitch type, the card says which way to go.</li>
+          </ul>
+          <div className="mt-8 flex flex-wrap items-center gap-2">
+            <span className="mr-2 text-sm text-[#9AA3B1]">Grade colors:</span>
+            {[75, 85, 95, 100, 105, 115, 125].map((v) => <Grade key={v} v={v} />)}
+            <span className="ml-2 text-sm text-[#9AA3B1]">blue below average · red above</span>
+          </div>
+        </Block>
+      </div>
 
       <SiteFooter>
-        <Link to="/methodology" className="text-[#9AA3B1] hover:text-[#EDF0F4]">
-          Next: Methodology
-        </Link>
+        <Link to="/methodology" className="text-[#9AA3B1] hover:text-[#EDF0F4]">Next: how it's built →</Link>
       </SiteFooter>
     </SitePage>
   );
