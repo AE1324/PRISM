@@ -15,7 +15,7 @@ Files (all inside the gitignored data/ folder)
   data/rapsodo/*.csv                         Rapsodo player exports
   data/awre/*PitchData-*.xls                 AWRE pitch logs
   data/rapsodo/review_decisions.csv          saved keep/drop calls (or a filled-in review workbook)
-  data/rosters/hitters.csv                   optional: Batter, Bats (R/L/S)
+  data/rosters/roster.csv                    optional: Name, Bats (R/L/S), Throws, Position, Height
   data/rosters/inactive_pitchers.txt         optional: one name per line, left out entirely
   -> data/processed/<name>.parquet           all pitches, with issues, exclude flag and results
   -> data/review/<name>_review.xlsx          the review workbook
@@ -63,7 +63,8 @@ def add_batter_side(df: pd.DataFrame, path: Path) -> pd.DataFrame:
     if not path.exists():
         return df
     roster = pd.read_csv(path)
-    side = dict(zip(roster["Batter"].map(rapsodo.clean_name), roster["Bats"].astype(str).str.upper().str[0]))
+    names = roster["Name"] if "Name" in roster else roster["Batter"]
+    side = dict(zip(names.map(rapsodo.clean_name), roster["Bats"].astype(str).str.upper().str[0]))
     known = df["Batter"].map(lambda b: side.get(rapsodo.clean_name(b)) if isinstance(b, str) else None)
     # Switch hitters bat opposite the pitcher.
     switch = known == "S"
@@ -218,7 +219,7 @@ def main() -> None:
     parser.add_argument("--rapsodo", default=str(DATA_DIR / "rapsodo"))
     parser.add_argument("--awre", default=str(DATA_DIR / "awre"))
     parser.add_argument("--decisions", default=str(DATA_DIR / "rapsodo" / "review_decisions.csv"))
-    parser.add_argument("--hitters", default=str(DATA_DIR / "rosters" / "hitters.csv"))
+    parser.add_argument("--hitters", default=str(DATA_DIR / "rosters" / "roster.csv"))
     parser.add_argument("--inactive", default=str(DATA_DIR / "rosters" / "inactive_pitchers.txt"))
     args = parser.parse_args()
 
