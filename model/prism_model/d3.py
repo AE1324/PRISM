@@ -73,6 +73,60 @@ def _d3_rates() -> dict:
     return out
 
 
+def _location_reference(years=(2024, 2025), min_pitches: int = 100) -> dict:
+    """
+    D3 centering for Location+. There's no D3 plate-location data, but there are D3 strike rates. On MLB
+    pitcher-season pitch types, location score rises with strike rate; that slope turns the D3-vs-MLB
+    strike gap into an expected D3 location score, and later turns a staff's own strike rate into where
+    the staff's command sits (strike calls are outcomes, so they don't depend on the tracking device).
+    """
+    from prism_model import references as R
+
+    strike_calls = set(R.STRIKE_CALLS)
+    parts = []
+    for yr in years:
+        f = PROCESSED_DIR / f"statcast_{yr}_shapes.parquet"
+        if not f.exists():
+            continue
+        s = pd.read_parquet(f, columns=["PitcherId", "shape_family", "PitchCall", "PlateLocSide", "PlateLocHeight"])
+        s = s.dropna(subset=["PlateLocSide", "PlateLocHeight"])
+        box = lambda w, lo, hi: (s["PlateLocSide"].abs() <= w) & s["PlateLocHeight"].between(lo, hi)  # noqa: E731
+        s["comp"] = box(R.COMPETITIVE_SIDE, R.COMPETITIVE_LOW, R.COMPETITIVE_HIGH)
+        s["mid"] = box(R.MIDDLE_SIDE, R.MIDDLE_LOW, R.MIDDLE_HIGH)
+        s["strike"] = s["PitchCall"].isin(strike_calls)
+        g = s.groupby(["PitcherId", "shape_family"]).agg(n=("strike", "size"), strike=("strike", "mean"),
+                                                         comp=("comp", "mean"), mid=("mid", "mean"))
+        parts.append(g[g["n"] >= min_pitches].reset_index())
+    if not parts:
+        return {}
+    g = pd.concat(parts)
+    g["loc"] = 100 * (g["comp"] - g["mid"])
+    g["strike"] *= 100
+    rates = _d3_rates()
+    mlb_scale = R.load()[0]["scale"]
+    out = {}
+    for kind, x in g.groupby("shape_family"):
+        syn = SYNERGY_TYPE.get(kind)
+        if syn not in rates or kind not in mlb_scale or len(x) < 30:
+            continue
+        slope = float(np.polyfit(x["strike"], x["loc"], 1, w=np.sqrt(x["n"]))[0])
+        mlb_strike = float(np.average(x["strike"], weights=x["n"]))
+        d3_strike = 100 * rates[syn]["strike"]
+        out[kind] = {
+            "slope": slope, "mlb_strike": mlb_strike, "d3_strike": d3_strike,
+            "d3_location_mean": float(mlb_scale[kind]["location_mean"] + slope * (d3_strike - mlb_strike)),
+        }
+    return out
+
+
+def add_location_reference() -> dict:
+    """Add (or refresh) the Location+ D3 centering in the saved reference without rebuilding the rest."""
+    ref = load() or {}
+    ref["location"] = _location_reference()
+    joblib.dump(ref, PATH)
+    return ref
+
+
 def build() -> dict:
     from prism_model.velo_whiff_check import _logit_slope, d3_curve, mlb_curve
 
@@ -86,6 +140,7 @@ def build() -> dict:
         "velo_weight_measured": float(ratio),
         "velo_weight": float(min(max(ratio, 1.0), MAX_VELO_WEIGHT)),
         "rates": _d3_rates(),
+        "location": _location_reference(),
     }
     PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(ref, PATH)

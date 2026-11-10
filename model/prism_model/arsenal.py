@@ -228,28 +228,49 @@ def d3_stuff(rows: pd.DataFrame, models: dict | None, d3ref: dict | None,
     return rows
 
 
-def regress_location(rows: pd.DataFrame, ref: dict) -> pd.DataFrame:
+def regress_location(rows: pd.DataFrame, ref: dict, d3ref: dict | None = None,
+                     strikes: pd.DataFrame | None = None) -> pd.DataFrame:
     """
-    Replace each row's raw location with a sample-size-regressed one (raw kept in ``location_raw``).
+    Replace each row's raw location with a calibrated, sample-size-regressed one (raw kept in ``location_raw``).
 
-    Works in deviations from the MLB mean for the pitch type. Staff offset = located-pitch-weighted mean
-    deviation; pitcher command = staff + n/(n+LOC_K_PITCHER) x (his deviation - staff); pitch type =
-    pitcher + n/(n+LOC_K_TYPE) x (its deviation - pitcher). A 20-pitch slider thrown well in the zone barely
-    moves off his overall command; it takes a few hundred pitches for a pitch's own location to count fully.
+    Works in deviations from the average location score for the pitch type: the D3 average when the D3
+    reference has it (so Location+ 100 = D3 average, like the other grades), else the MLB average.
+
+    Device calibration. Plate location depends on the tracking system (Rapsodo extrapolates it from early
+    flight and scatters pitches more than TrackMan or Statcast), so the staff's average raw location isn't
+    comparable to MLB-measured references. When D3 strike data is available, the staff's level is set from
+    its strike rate vs D3 by pitch type (strike calls are outcomes, independent of the device), converted to
+    location points with the MLB strike-to-location slope. Location data then only separates pitchers and
+    pitches within the staff, all measured on the same device.
+
+    Regression: pitcher command = staff + n/(n+LOC_K_PITCHER) x (his deviation - staff); pitch type =
+    pitcher + n/(n+LOC_K_TYPE) x (its deviation - pitcher).
     """
     rows = rows.copy()
     rows["location_raw"] = rows["location"]
-    mean = rows["shape_family"].map(lambda f: ref["scale"].get(f, {}).get("location_mean", np.nan))
-    dev = rows["location"] - mean
+    mlb_mean = rows["shape_family"].map(lambda f: ref["scale"].get(f, {}).get("location_mean", np.nan))
+    lref = (d3ref or {}).get("location") or {}
+    center = rows["shape_family"].map(lambda f: lref.get(f, {}).get("d3_location_mean", np.nan)).fillna(mlb_mean)
+    dev = rows["location"] - center
     n = rows["n_located"].where(dev.notna(), 0).astype(float)
     if n.sum() == 0:
         return rows
-    staff = float(np.nansum(dev * n) / n.sum())
+    observed = float(np.nansum(dev * n) / n.sum())
+    staff = observed
+    if lref and strikes is not None and len(strikes):
+        st = strikes[strikes["shape_family"].isin(list(lref))]
+        if st["n"].sum() > 0:
+            gap = st.apply(lambda r: lref[r["shape_family"]]["slope"] * (100 * r["strike"] - lref[r["shape_family"]]["d3_strike"]), axis=1)
+            n_st = float(st["n"].sum())
+            # the staff's command level from strikes, regressed toward D3 average by its sample
+            staff = float(np.average(gap, weights=st["n"])) * n_st / (n_st + LOC_K_PITCHER)
+    dev = dev - (observed - staff)   # device offset removed: the staff now sits where its strike-throwing says
     by_p = pd.DataFrame({"p": rows["PitcherId"], "x": (dev * n).fillna(0), "n": n}).groupby("p")[["x", "n"]].sum()
     raw_p = (by_p["x"] / by_p["n"].replace(0, np.nan)).fillna(staff)
     cmd = staff + by_p["n"] / (by_p["n"] + LOC_K_PITCHER) * (raw_p - staff)
     pc = rows["PitcherId"].map(cmd)
-    rows["location"] = mean + pc + n / (n + LOC_K_TYPE) * (dev - pc)
+    # expressed on the MLB location scale so the shared Location+ formula (mean/SD) yields 100 = the center
+    rows["location"] = mlb_mean + pc + n / (n + LOC_K_TYPE) * (dev - pc)
     rows["location"] = rows["location"].where(dev.notna())
     return rows
 
@@ -264,7 +285,11 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
     rows = rows.merge(location_score(df, by), on=by, how="left").merge(results_score(df, by), on=by, how="left")
     rows["n_located"] = rows["n_located"].fillna(0).astype(int)
     rows["n_game"] = rows["n_game"].fillna(0).astype(int)
-    rows = regress_location(rows, ref)
+    strikes = None
+    if "strike" in df:
+        g = df[df["strike"].notna()]
+        strikes = g.groupby("shape_family")["strike"].agg(["mean", "size"]).rename(columns={"mean": "strike", "size": "n"}).reset_index()
+    rows = regress_location(rows, ref, d3ref if scale == "d3" else None, strikes)
     rows["usage"] = rows["n"] / rows.groupby("PitcherId")["n"].transform("sum")
 
     sc = ref["scale"]

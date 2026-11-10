@@ -230,3 +230,20 @@ def test_markdown_renders(reports):
     for heading in ("## Development", "## Pitch grades", "## Pitch by pitch", "## Situations", "## Movement profile"):
         assert heading in md
     assert "**So:**" in md
+
+
+def test_location_device_calibration_centers_staff_on_strike_rate():
+    """A staff whose strike rate equals D3 average sits at the D3 center, whatever its raw (device) location."""
+    import numpy as np
+    import pandas as pd
+    from prism_model.arsenal import regress_location
+
+    ref = {"scale": {"Four-seam": {"location_mean": 44.0, "location_std": 3.3}}}
+    d3ref = {"location": {"Four-seam": {"slope": 0.14, "mlb_strike": 66.0, "d3_strike": 62.0, "d3_location_mean": 43.5}}}
+    rows = pd.DataFrame({"PitcherId": ["a", "b"], "shape_family": ["Four-seam"] * 2,
+                         "location": [36.0, 40.0], "n_located": [400, 400]})  # raw reads ~6 pts low on this device
+    strikes = pd.DataFrame({"shape_family": ["Four-seam"], "strike": [0.62], "n": [800]})
+    out = regress_location(rows, ref, d3ref, strikes)
+    dev = out["location"] - 44.0  # deviation on the MLB scale = deviation from the D3 center
+    assert abs(np.average(dev, weights=rows["n_located"])) < 0.05  # staff centered at D3 average
+    assert dev.iloc[1] > 0 > dev.iloc[0]  # within-staff order kept

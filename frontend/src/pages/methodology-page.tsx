@@ -241,6 +241,8 @@ export default function MethodologyPage() {
               ["Competitive zone", "within 1.11 ft of the middle of the plate, 1.17–3.83 ft high"],
               ["Middle", "within 0.56 ft of center, 1.83–3.17 ft high"],
               ["Score", "% in the competitive zone − % in the middle"],
+              ["Center (100)", "D3 average, estimated from Synergy D3 strike rates and the MLB strike-to-location slope by pitch type"],
+              ["Device calibration", "staff level set from its strike rate vs D3 (strike calls don't depend on the tracker); location only separates pitchers and pitches within the staff"],
               ["Regression", "pitcher command → staff at n ÷ (n + 300); each pitch type → his command at n ÷ (n + 400)"],
             ]}>
             <p className="m-0">
@@ -248,6 +250,14 @@ export default function MethodologyPage() {
               what chance alone produces in 20 to 40 pitches. So a 17-pitch slider that happened to land well can't be graded
               like an elite command pitch. PRISM regresses in two steps: first each pitcher's overall command toward the
               staff, then each pitch type toward his own command. As pitches pile up, each pitch's own location takes over.
+            </p>
+            <p className="m-0">
+              Plate location also depends on the tracker. Rapsodo estimates it from the first part of the ball's flight, so
+              it scatters pitches more than TrackMan does and puts fewer of them in the competitive zone on paper. Left
+              alone, that made a staff that throws strikes at the Division III average look like below-average command. So
+              the staff's overall level comes from what doesn't depend on the device, its strike rate against D3 averages
+              for each pitch type, and location is used to rank pitchers and pitches within the staff. 100 is the Division
+              III average, like every other grade.
             </p>
           </Section>
 
