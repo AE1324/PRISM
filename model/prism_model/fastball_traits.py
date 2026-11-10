@@ -210,9 +210,6 @@ def traits(p: pd.DataFrame, model: dict, offset: tuple[float, float], height: fl
             if plate_h < 2.7:
                 limits.append((f"He isn't using the flat angle: his four-seam averages {plate_h:.1f} ft at the plate",
                                "Elevate the four-seam more; the flat angle plays best at and above the top of the zone."))
-        elif vp <= LOW:
-            limits.append((f"Steep approach angle: {angle}, so the four-seam is easier to square up at the top of the zone",
-                           "Locate the four-seam to the edges rather than up, or explore a sinker that uses the steep angle."))
     else:
         if vp <= LOW:
             strengths.append(f"Steep approach angle: {angle}, which suits a sinker working low for ground balls")
@@ -220,6 +217,8 @@ def traits(p: pd.DataFrame, model: dict, offset: tuple[float, float], height: fl
             strengths.append(f"Unusually flat angle for a sinker: {angle}, from his low release; it can also play "
                              "at the top of the zone as a running fastball, not just down")
 
+    # Only show the approach angle when it helps him (flat four-seam, or steep sinker).
+    out["show_vaa"] = (main == "Four-seam" and vp >= HIGH) or (main != "Four-seam" and (vp <= LOW or vp >= HIGH))
     out["strengths"] = strengths
     out["limits"] = [t for t, _ in limits]
     out["fixes"] = [f for _, f in limits]

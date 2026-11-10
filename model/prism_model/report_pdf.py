@@ -96,6 +96,13 @@ td.in {{ color: #1f6b40; font-weight: 700; }} td.out {{ color: {CRIMSON}; font-w
 .charts {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 4px 0 6px; }}
 .chart .t {{ font-size: 6.8pt; letter-spacing: 0.8px; color: #888; text-transform: uppercase; font-weight: 700; }}
 .plan {{ font-size: 9.6pt; }}
+.pcard {{ border: 1px solid #e3dede; border-left: 4px solid #999; border-radius: 6px; padding: 9px 12px; margin: 8px 0; break-inside: avoid; }}
+.pcard .hd {{ font-size: 7.6pt; letter-spacing: 1.2px; font-weight: 700; color: #666; text-transform: uppercase; }}
+.pcard .job {{ font-weight: 700; margin: 4px 0 2px; }}
+.pcard p {{ margin: 3px 0; }}
+.rbox {{ background: #f6eeef; border-radius: 6px; padding: 7px 10px; margin: 7px 0 3px; }}
+.rbox .t {{ font-size: 7.4pt; letter-spacing: 1px; font-weight: 700; color: #555; text-transform: uppercase; margin-bottom: 3px; }}
+.rbox p {{ margin: 3px 0; font-size: 8.4pt; }}
 .oneline {{ background: #faf6ef; border-left: 4px solid {GOLD}; padding: 9px 13px; font-size: 10pt; margin-top: 14px; break-inside: avoid; }}
 """
 
@@ -290,23 +297,130 @@ def needs_work_card(r: dict) -> str:
     t = w.get("targets")
     if t:
         H.append('<div class="label">Right now → target</div><table><tr><th>Shape</th><th class="num">Right now</th>'
-                 '<th class="num">Target (versions that work)</th></tr>')
+                 '<th class="num">Where it plays best</th><th class="num">Stuff+ gain</th></tr>')
         for row in t["rows"]:
             cls = "in" if row["in_range"] else "out"
-            H.append(f'<tr><td>{_e(row["label"])}</td><td class="num {cls}">{row["now"]:+.1f} {row["unit"]}</td>'
-                     f'<td class="num">{row["lo"]:+.1f} to {row["hi"]:+.1f} {row["unit"]}</td></tr>')
+            fmt = {"ivb": lambda v: f"{v:+.1f}", "hb": lambda v: f"{v:+.1f}", "spin": lambda v: f"{v:,.0f}"}.get(
+                row["trait"], lambda v: f"{v:.1f}")
+            target = "already there" if row["in_range"] else row.get("target_text", "")
+            gain = "–" if row["in_range"] else f'{row["gain"]:+.0f}'
+            H.append(f'<tr><td>{_e(row["label"])}</td><td class="num {cls}">{fmt(row["now"])} {row["unit"]}</td>'
+                     f'<td class="num">{target}</td><td class="num">{gain}</td></tr>')
         rates = p.get("rates") or {}
-        if rates.get("strike") is not None:
-            ref = (p.get("rates_ref") or {}).get("strike")
-            ok = ref is not None and rates["strike"] >= ref
+        ref = (p.get("rates_ref") or {}).get("strike")
+        if rates.get("strike") is not None and ref is not None:
+            ok = rates["strike"] >= ref
             H.append(f'<tr><td>Strike %</td><td class="num {"in" if ok else "out"}">{rates["strike"]:.0f}%</td>'
-                     f'<td class="num">{ref:.0f}%+</td></tr>' if ref is not None else "")
+                     f'<td class="num">{ref:.0f}%+</td><td class="num">–</td></tr>')
         H.append("</table>")
-        H.append(f'<div class="note">Target: the middle half of MLB {w["pitch"].lower()}s from pitchers with a similar release '
-                 f'height whose version worked ({t["n_comps"]} pitcher-seasons). Green is in range, red is outside it.</div>')
+        H.append(f'<div class="note">Each trait is moved on its own across the range {_e(t["pool"])} cover, and the Stuff model '
+                 'grades every version (velocity only goes up, to +4 mph on each pitch, shown as the speed that pitch should reach; the gap off the fastball holds this pitch\'s speed and moves the fastball; spin up to 300 rpm either way). A trait is a target only if changing it is worth 5+ Stuff+; green means he\'s already '
+                 'within 2 points of its best.</div>')
         H.append(f'<p style="margin:6px 0 0"><b>The plan:</b> {_e(t["plan"])}</p>')
     else:
         H.append(f'<p>{_e(p.get("so", ""))}</p>')
+    H.append("</div>")
+    return "".join(H)
+
+
+def _target_table(t: dict, p: dict) -> str:
+    H = ['<table><tr><th>Shape</th><th class="num">Right now</th><th class="num">Where it plays best</th>'
+         '<th class="num">Stuff+ gain</th></tr>']
+    for row in t["rows"]:
+        cls = "in" if row["in_range"] else "out"
+        fmt = {"ivb": lambda v: f"{v:+.1f}", "hb": lambda v: f"{v:+.1f}", "spin": lambda v: f"{v:,.0f}",
+               "gap": lambda v: f"{-v:.1f}"}.get(row["trait"], lambda v: f"{v:.1f}")
+        target = "already there" if row["in_range"] else row.get("target_text", "")
+        if row["trait"] == "gap" and not row["in_range"]:
+            target = target.replace(" off his fastball", " off FB")
+        gain = "–" if row["in_range"] else f'{row["gain"]:+.0f}'
+        H.append(f'<tr><td>{_e(row["label"])}</td><td class="num {cls}">{fmt(row["now"])} {row["unit"]}</td>'
+                 f'<td class="num">{_e(target)}</td><td class="num">{gain}</td></tr>')
+    rates, ref = p.get("rates") or {}, (p.get("rates_ref") or {}).get("strike")
+    if rates.get("strike") is not None and ref is not None:
+        ok = rates["strike"] >= ref - 3  # within a few points of average counts as fine
+        H.append(f'<tr><td>Strike %</td><td class="num {"in" if ok else "out"}">{rates["strike"]:.0f}%</td>'
+                 f'<td class="num">{ref:.0f}%+</td><td class="num">–</td></tr>')
+    H.append("</table>")
+    return "".join(H)
+
+
+def pitch_cards(r: dict) -> str:
+    """One card per pitch: its job, the evidence, what the research says, spin axis, whiff vs contact version."""
+    H = ['<div><div class="sub" style="margin:0 0 4px">From his fall outings. A pitch has a job when '
+         'it\'s clearly better than average in at least one way: strikes, called strikes, whiffs, chase or putaway. '
+         'Research targets come from the Stuff model, comparing him with MLB pitches of the same subtype.</div>']
+    for p in r["pitch_by_pitch"]:
+        col = _color(p["pitch"])
+        sub = f" · {p['subtype']}" if p.get("subtype") else ""
+        sh = p.get("shape") or {}
+        H.append(f'<div class="pcard" style="border-left-color:{col}"><div class="hd"><span class="dot" style="background:{col}">'
+                 f'</span>{_e(p["pitch"])}{_e(sub)} <span class="pill {VERDICT_TONE.get(p.get("verdict", ""), "muted")}">'
+                 f'{_e(str(p.get("verdict", "")).lower())}</span> <span style="font-weight:400;letter-spacing:0">Pitch+ '
+                 f'{_e(p["grades"]["pitch_plus"])} · {p["n"]} thrown, {p["game_pitches"]} vs hitters</span></div>')
+        if not isinstance(p["grades"]["pitch_plus"], (int, float)):
+            H.append(f'<p>{_e(p.get("so", ""))}</p></div>')
+            continue
+        if sh:
+            H.append(f'<p class="note" style="margin-top:2px">Avg {_e(sh.get("velo"))} mph · IVB {_e(sh.get("ivb"))}" · '
+                     f'HB {_e(sh.get("hb_arm"))}" · {_e(sh.get("spin"))} rpm</p>')
+        if p.get("jobs"):
+            j = p["jobs"][0]
+            H.append(f'<div class="job">Doing its job: {_e(j["job"].lower())}.</div><p>Doing well: {_e(j["evidence"])}'
+                     + (f"; also {_e('; '.join(x[0].lower() + x[1:] for x in p['great']))}" if p.get("great") else "") + ".</p>")
+        else:
+            H.append('<div class="job">No clear job yet.</div>')
+        if p.get("deal_breakers"):
+            H.append("<p><b class='bad'>Where it's failing:</b> " +
+                     _e("; ".join(f"{b['issue'].lower()} ({b['evidence']})" for b in p["deal_breakers"])) + ".</p>")
+        if p.get("not_strength"):
+            H.append(f"<p>Not its strength: {_e('; '.join(p['not_strength']))}.</p>")
+
+        # What the research says.
+        t = p.get("targets")
+        if t:
+            working = p.get("verdict") == "Working"
+            gaps = [x for x in t["rows"] if not x["in_range"]]
+            H.append('<div class="rbox"><div class="t">What the research says for this pitch</div>')
+            if working:
+                H.append("<p>It's working, so these are add-ons to try, not fixes:</p>" if gaps else
+                         "<p>It's working, and its shape is already close to the best version of this pitch.</p>")
+            if gaps or not working:
+                H.append(_target_table(t, p))
+                H.append(f'<p><b>{"The add-on" if working else "The plan"}:</b> {_e(t["plan"])}</p>')
+            H.append("</div>")
+
+        # Spin axis.
+        ax = p.get("spin_axis")
+        if ax:
+            H.append('<div class="rbox"><div class="t">Spin axis</div>')
+            if ax.get("call"):
+                if ax.get("good"):
+                    g = ax["good"]
+                    H.append(f'<p><b>Chase: {g["clock"]}.</b> That\'s {ax["good_word"]} than his normal {ax["normal"]}, and '
+                             f'he already throws it there on {g["share"]}% of them.</p>')
+                    H.append(f'<p><b>Good version, {g["clock"]}</b> ({g["share"]}%): {g["ivb"]}" ride, {g["hb"]:+}" arm side, '
+                             f'{g["velo"]} mph, {g["total"]}" total break.</p>')
+                if ax.get("bad"):
+                    b = ax["bad"]
+                    H.append(f'<p><b>Bad version, {b["clock"]}</b> ({b["share"]}%): {b["ivb"]}" ride, {b["hb"]:+}" arm side, '
+                             f'{b["velo"]} mph, {b["total"]}" total break.</p>')
+                H.append(f'<p>Normal axis {ax["normal"]}, the middle half of his pitches within {ax["spread_deg"]}° '
+                         f'({ax["n"]} pitches; the axis here is the direction it moves).</p>')
+                if ax.get("good") or ax.get("bad"):
+                    H.append(f'<p>Why chase it: in MLB data, the same pitcher\'s {p["pitch"].lower()} {ax["good_word"]} than his '
+                             f'normal plays better ({_e(ax["why"])}), at the same total break.</p>')
+                else:
+                    H.append(f'<p>He holds this axis tightly; no separate good or bad version shows up yet.</p>')
+                if ax.get("drift"):
+                    H.append(f'<p>Why it drifts: {_e(ax["drift"])}</p>')
+            else:
+                H.append(f'<p>Normal axis {ax["normal"]}, the middle half within {ax["spread_deg"]}° ({ax["n"]} pitches). '
+                         f'{_e(ax["note"])}</p>')
+            H.append("</div>")
+        if p.get("swing_split"):
+            H.append(f'<p><b>Whiff version vs contact version:</b> {_e(p["swing_split"])}</p>')
+        H.append(f'<p><b>So:</b> {_e(p.get("so", ""))}</p></div>')
     H.append("</div>")
     return "".join(H)
 
@@ -421,6 +535,10 @@ def to_html(r: dict, scale_note: str = "") -> str:
     def sec(title: str, body: str) -> str:
         # Heading and its first card stay on one page; the rest may flow.
         cut = body.find('<div class="card', 1)
+        if body.startswith("<div><div class=\"sub\""):
+            first_end = body.find('<div class="pcard', body.find('<div class="pcard') + 1)
+            return (f'<div class="sec"><h2 class="step">{title}</h2>{body[:first_end]}</div>{body[first_end:]}'
+                    if first_end != -1 else f'<div class="sec"><h2 class="step">{title}</h2>{body}</div>')
         first, rest = (body, "") if cut == -1 else (body[:cut], body[cut:])
         return f'<div class="sec"><h2 class="step">{title}</h2>{first}</div>{rest}'
 
@@ -432,8 +550,7 @@ def to_html(r: dict, scale_note: str = "") -> str:
          development_card(r),
          sec("Pitch by pitch", pitch_by_pitch_card(r)),
          sec("The shape picture", shape_cards(r))]
-    if r.get("needs_work"):
-        H.append(sec("The pitch that needs work", needs_work_card(r)))
+    H.append(sec("What each pitch is doing", pitch_cards(r)))
     H += [sec("The arsenal plan", arsenal_card(r)), sec("The counts", counts_card(r)),
           sec("The grades, explained", grades_card(r)), sec("Progress through the fall", progress_cards(r))]
     d = r["development"]

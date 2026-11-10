@@ -262,10 +262,6 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
     ]
     rows["pitch_plus"] = rows["pitch_plus"].astype(float)
 
-    # Where each pitch ranks on the staff among the same pitch type.
-    for comp in ["pitch_plus", "stuff"]:
-        rows[f"{comp}_rank"] = rows.groupby("shape_family")[comp].rank(ascending=False, method="min")
-        rows[f"{comp}_of"] = rows.groupby("shape_family")[comp].transform("count")
     return rows
 
 
@@ -311,6 +307,12 @@ def explain_stuff(rows: pd.DataFrame, ref: dict, models: dict | None) -> dict:
 def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
     """MLB pitcher-seasons with a similar pitch, and how they did versus the average of that pitch type."""
     pool = mlb_rows[mlb_rows["shape_family"] == r["shape_family"]].dropna(subset=["xrv100"])
+    sub = r.get("subtype")
+    same = pool[pool["subtype"] == sub] if isinstance(sub, str) and "subtype" in pool else pool
+    by_sub = isinstance(sub, str) and "subtype" in pool and len(same) >= 40
+    label = f"{sub.lower()}s" if by_sub else f"{r['shape_family'].lower()}s"
+    if by_sub:
+        pool = same  # compare like with like: sweepers with sweepers
     if pool.empty or pd.isna(r["velo"]):
         return None
     shift = r.get("velo_shift", 0.0)
@@ -322,7 +324,7 @@ def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
         if len(near) >= 25:
             break
     if len(near) < 10:
-        return {"n": int(len(near)), "text": f"Too few MLB {r['shape_family'].lower()}s with this speed and shape to compare."}
+        return {"n": int(len(near)), "text": f"Too few MLB {label} with this speed and shape to compare."}
     diff = np.average(near["xrv100"], weights=near["n"]) - type_avg
     word = "fewer" if diff < 0 else "more"
     return {
@@ -331,10 +333,10 @@ def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
         "window": f"±{dv:g} mph, ±{dm:g} in",
         "runs_per_100_vs_avg": round(float(diff), 2),
         "mlb_equivalent_velo": round(float(velo), 1),
-        "text": (f"{len(near)} comparable MLB {r['shape_family'].lower()}s "
+        "text": (f"{len(near)} comparable MLB {label} "
                  + (f"(around {velo:.0f} mph, his D3-equivalent speed, " if abs(velo - r['velo']) >= 0.5 else "(")
                  + f"±{dv:g} mph, ±{dm:g} in of movement) "
-                 f"allowed {abs(diff):.2f} {word} runs per 100 pitches than the average MLB {r['shape_family'].lower()}."),
+                 f"allowed {abs(diff):.2f} {word} runs per 100 pitches than the average MLB {label[:-1]}."),
     }
 
 
@@ -390,10 +392,17 @@ def judge_pitch(row: pd.Series, rates: pd.Series) -> dict:
         return f"{RATE_LABEL[col].capitalize()} {_pct(rates[f'{col}_rate']):.0f}% vs {_pct(rates[f'{col}_ref']):.0f}% for {word}"
 
     calls = {c: clearly(rates[f"{c}_rate"], rates[f"{c}_ref"], rates[f"{c}_n"], RATE_MIN_N[c]) for c in RATE_COLUMNS}
-    jobs = [{"job": name, "does": does, "evidence": line(c)} for c, good, name, does in JOBS if calls[c] == good]
+    def edge(c, good):
+        r, r0 = rates[f"{c}_rate"], rates[f"{c}_ref"]
+        return good * (r - r0) / max(r0 if good > 0 else 1 - r0, 0.05)
+
+    jobs = sorted(({"job": name, "does": does, "evidence": line(c), "edge": edge(c, good)}
+                   for c, good, name, does in JOBS if calls[c] == good), key=lambda j: -j["edge"])
+    jobs = jobs[:1]  # one job per pitch: the clearest edge; other strengths show as supporting evidence
     breakers = [{"issue": label, "evidence": line(c)} for c, (bad, label) in DEAL_BREAKERS.items() if calls[c] == bad]
     good_dirs = {c: g for c, g, _, _ in JOBS}
-    great = [line(c) for c in RATE_COLUMNS if c in good_dirs and calls[c] == good_dirs[c]]
+    great = [line(c) for c in RATE_COLUMNS if c in good_dirs and calls[c] == good_dirs[c]
+             and not (jobs and line(c) == jobs[0]["evidence"])]
     weak = [line(c) for c in RATE_COLUMNS if c in good_dirs and calls[c] == -good_dirs[c] and c not in DEAL_BREAKERS]
 
     n_game = int(row["n_game"])
@@ -675,6 +684,12 @@ def development(p: pd.DataFrame, rows: pd.DataFrame, judged: dict, sit: dict, st
         makes += traits["strengths"]
         holding += traits["limits"]
         priorities += [(2.5, f) for f in traits["fixes"]]
+        pct = traits.get("velo_pct_d3")
+        if pct is not None and pct < VELO_FLAG_PCT:
+            holding.insert(0, f"Velocity: his {traits['velo']} mph {traits['pitch'].lower()} is in the "
+                              f"{fastball_traits.ordinal(pct)} percentile among D3 pitchers")
+            priorities.append((0.5, "Add velocity across the whole arsenal: every pitch grades better when everything "
+                                    "gets harder together, so the gaps off the fastball stay the same."))
 
     no_job = [k for k, v in judged.items() if v["verdict"] == "No clear job yet"]
     if no_job:
@@ -716,13 +731,319 @@ def summary_sentence(name: str, dev: dict, judged: dict, rows: pd.DataFrame) -> 
                      f"({graded.iloc[0]['pitch_plus']:.0f} Pitch+)")
     if dev["priority_order"]:
         step = dev["priority_order"][0].split(" (")[0].split(":")[0].split(";")[0].rstrip(".")
-        parts.append(f"the next step is: {step[0].lower() + step[1:]}")
+        parts.append(f"his next step: {step[0].lower() + step[1:]}")
     return "; ".join(parts) + "."
 
 
 # --------------------------------------------------------------------------
 # Putting it together
 # --------------------------------------------------------------------------
+TRAITS = {  # trait -> (columns that move with it, step, label, unit)
+    # This pitch harder (fastball moves with it, so the gap stays the same). Never asks for slower.
+    "velo": (["velo", "perceived_velo"], 0.5, "Velocity", "mph"),
+    # Separation from his fastball, with this pitch's own speed held (i.e. the fastball moves).
+    "gap": (["velo_diff"], 0.5, "Gap off fastball", "mph"),
+    "ivb": (["ivb", "ivb_diff"], 1.0, "IVB (ride +)", "in"),
+    "hb": (["hb", "hb_diff"], 1.0, "HB (arm side +)", "in"),
+    "spin": (["spin"], 100.0, "Spin", "rpm"),
+}
+GRIP_SLOWED = ("Changeup", "Splitter")  # the only pitches where "slower" can be the right goal (via grip, not intent)
+VELO_FLAG_PCT = 25   # fastball velocity below this D3 percentile becomes a headline priority
+TARGET_GAIN = 5.0   # Stuff+ points a change has to be worth before it becomes a target (small nudges are noise)
+TARGET_BAND = 2.0   # values within this many points of the best count as "in range"
+VELO_UP_MAX = 4.0   # don't ask for more than ~4 mph
+SPIN_MAX_CHANGE = 300.0  # spin is hard to change; look at most +-300 rpm
+
+
+def pitch_needing_work(pitches: list[dict]) -> dict | None:
+    """
+    The pitch to build a card for: a graded pitch that grades below average (Pitch+ < 100)
+    or has a deal-breaker (not landing strikes, getting hit hard). Lowest Pitch+ first.
+    """
+    cand = [p for p in pitches if isinstance(p["grades"]["pitch_plus"], (int, float))
+            and (p["grades"]["pitch_plus"] < 100 or p.get("deal_breakers"))]
+    if not cand:
+        return None
+    p = min(cand, key=lambda x: x["grades"]["pitch_plus"])
+    return {"pitch": p["pitch"], "verdict": p.get("verdict", ""), "subtype": p.get("subtype")}
+
+
+def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref: dict) -> dict | None:
+    """
+    Shape targets from the Stuff model, kept inside his pitch's subtype.
+
+    Each trait (velocity, ride, run, spin) is moved on its own across the range MLB pitches of the
+    same subtype actually cover (10th-90th percentile; velocity only up to +4 mph), with everything
+    else held where he is. The Stuff+ the model gives at each value shows which changes matter: a
+    trait becomes a target only if moving it is worth 3+ Stuff+, and its target range is every
+    value within 2 points of the best one. Traits where he's already near the best stay green.
+    """
+    kind, sub = r["shape_family"], r.get("subtype")
+    sc = ref["scale"].get(kind)
+    if not sc:
+        return None
+    pool = mlb_rows[(mlb_rows["shape_family"] == kind)]
+    if isinstance(sub, str) and "subtype" in pool and (pool["subtype"] == sub).sum() >= 40:
+        pool = pool[pool["subtype"] == sub]
+    plus = lambda x: 100 - 10 * (x - sc["stuff_xrv_mean"]) / sc["stuff_xrv_std"]
+    base = predict(pd.DataFrame([r]), models)["stuff_xrv"].iloc[0]
+    if pd.isna(base):
+        return None
+    now_plus = float(plus(base))
+    rows = []
+    for key, (cols, step, label, unit) in TRAITS.items():
+        main = cols[0]
+        if pd.isna(r.get(main)):
+            continue
+        if key == "gap" and (r.get("group") == "Fastball" or pd.isna(r.get("velo_diff"))):
+            continue
+        if key == "velo":
+            lo, hi = 0.0, VELO_UP_MAX
+        else:
+            q = pool[main].dropna().quantile([0.1, 0.9]) if main in pool else None
+            if q is None or q.isna().any():
+                continue
+            lo, hi = float(q.iloc[0] - r[main]), float(q.iloc[1] - r[main])
+            lo, hi = min(lo, 0.0), max(hi, 0.0)
+            if key == "spin":
+                lo, hi = max(lo, -SPIN_MAX_CHANGE), min(hi, SPIN_MAX_CHANGE)
+        deltas = np.arange(np.floor(lo / step) * step, hi + step / 2, step)
+        grid = pd.DataFrame([r] * len(deltas)).reset_index(drop=True)
+        for c in cols:
+            if c in grid:
+                grid[c] = grid[c] + deltas
+        g = plus(predict(grid, models)["stuff_xrv"]).to_numpy(float)
+        if np.isnan(g).all():
+            continue
+        best = np.nanmax(g)
+        ok = deltas[g >= best - TARGET_BAND]
+        gain = best - now_plus
+        now = float(r[main] if key != "velo" else r["velo"])
+        win = (now + ok.min(), now + ok.max())
+        in_range = gain < TARGET_GAIN or ok.min() <= 0 <= ok.max()
+        if key == "gap" and main in pool:
+            # Only call out the gap when it's unusual for this kind of pitch; otherwise "harder fastball"
+            # is already covered by arsenal velocity.
+            g25, g75 = pool[main].dropna().quantile([0.25, 0.75])
+            in_range = in_range or bool(g25 <= r[main] <= g75)
+        best_delta = float(deltas[int(np.nanargmax(g))])
+        rows.append({"trait": key, "label": label, "unit": unit, "now": round(now, 1),
+                     "lo": round(win[0], 1), "hi": round(win[1], 1), "gain": round(gain, 0),
+                     "best_delta": round(best_delta, 1), "in_range": bool(in_range),
+                     "open_hi": bool(ok.max() >= deltas.max() - 1e-9 and ok.max() > 0),
+                     "open_lo": bool(ok.min() <= deltas.min() + 1e-9 and ok.min() < 0)})
+    if not rows:
+        return None
+    def word(x):
+        more = x["best_delta"] > 0
+        return {"velo": "more velocity", "gap": "less separation from his fastball" if more else "more separation from his fastball", "ivb": "more ride (less drop)" if more else "more drop",
+                "hb": ("less sweep" if r["hb"] < 0 else "more run") if more else ("more sweep" if r["hb"] < 0 else "less run"),
+                "spin": "more spin" if more else "less spin"}[x["trait"]]
+
+    def where(x):
+        if x["trait"] == "gap":  # velo_diff is negative; talk about it as mph off the fastball
+            lo, hi = -x["hi"], -x["lo"]
+            if x["open_lo"] and not x["open_hi"]:
+                return f"{lo:.1f}+ mph off his fastball"
+            if x["open_hi"] and not x["open_lo"]:
+                return f"{hi:.1f} mph or less off his fastball"
+            return f"{lo:.1f} to {hi:.1f} mph off his fastball"
+        if x["trait"] == "velo":  # an actual speed for this pitch, only ever up from where he is
+            return f"{x['lo']:.1f}+ mph" if x["open_hi"] else (
+                f"{x['lo']:.1f} to {x['hi']:.1f} mph" if x["lo"] != x["hi"] else f"about {x['lo']:.1f} mph")
+        f = {"ivb": lambda v: f"{v:+.1f}", "hb": lambda v: f"{v:+.1f}", "spin": lambda v: f"{v:,.0f}"}.get(
+            x["trait"], lambda v: f"{v:.1f}")
+        if x["open_hi"] and not x["open_lo"]:
+            return f"{f(x['lo'])} {x['unit']} or more"
+        if x["open_lo"] and not x["open_hi"]:
+            return f"{f(x['hi'])} {x['unit']} or less"
+        return f"{f(x['lo'])} to {f(x['hi'])} {x['unit']}" if x["lo"] != x["hi"] else f"about {f(x['lo'])} {x['unit']}"
+
+    for x in rows:
+        x["target_text"] = where(x)
+    shape_gaps = sorted((x for x in rows if not x["in_range"] and x["trait"] not in ("velo", "gap")), key=lambda x: -x["gain"])
+    gap = next((x for x in rows if x["trait"] == "gap" and not x["in_range"]), None)
+    velo = next((x for x in rows if x["trait"] == "velo" and not x["in_range"]), None)
+    gap_any = next((x for x in rows if x["trait"] == "gap" and not x["in_range"]), None)
+    if gap_any and gap_any["best_delta"] < 0 and kind in GRIP_SLOWED:
+        # A changeup that should come off the fastball more: don't also tell him to throw it harder.
+        # Its speed target lives in the gap row; added velocity goes to the fastball.
+        rows = [x for x in rows if x["trait"] != "velo"]
+        velo = None
+    parts = []
+    if shape_gaps:
+        g0 = shape_gaps[0]
+        parts.append(f"The shape change worth the most is {word(g0)}: about {g0['gain']:+.0f} Stuff+ at "
+                     f"{g0['target_text']} (he's at {(f'{g0[chr(110)+chr(111)+chr(119)]:,.0f}' if g0['trait'] == 'spin' else f'{g0[chr(110)+chr(111)+chr(119)]:+.1f}')}).")
+        if len(shape_gaps) > 1:
+            parts.append("After that: " + ", ".join(f"{word(x)} ({x['gain']:+.0f})" for x in shape_gaps[1:]) + ".")
+    else:
+        parts.append("His shape is already close to the best version of this pitch.")
+    if gap:
+        if gap["best_delta"] < 0 and kind in GRIP_SLOWED:
+            # The one exception: a changeup/splitter too close to the fastball. Slowing it is the pitch's whole
+            # design, but it has to come from the grip with fastball arm speed, not from easing up.
+            parts.append(f"It's too close to his fastball's speed ({-gap['now']:.1f} mph off; {kind.lower()}s like his "
+                         f"play best at {gap['target_text']}: {gap['gain']:+.0f}). This is the one case where taking speed "
+                         "off makes sense, but it has to come from the grip (deeper in the hand, more pronation, less "
+                         "fingertip pressure) with the same arm speed as his fastball, never from easing up. Adding velocity "
+                         "to the fastball widens the gap too.")
+        elif gap["best_delta"] < 0:
+            parts.append(f"It plays better with more separation from his fastball ({gap['target_text']}, he's at "
+                         f"{-gap['now']:.1f}: {gap['gain']:+.0f}); get there by adding velocity to the fastball, "
+                         "not by slowing this pitch down.")
+        else:
+            parts.append(f"It plays better closer to his fastball's speed ({gap['target_text']}, he's at "
+                         f"{-gap['now']:.1f}: {gap['gain']:+.0f}); throw this pitch harder relative to the fastball.")
+    if velo:
+        parts.append(f"More velocity helps too: {velo['target_text']} on this pitch ({velo['gain']:+.0f}, he's at "
+                     f"{velo['now']:.1f}), coming from more arm speed across his whole arsenal.")
+    if not shape_gaps and not velo and not gap:
+        parts.append("The work is landing it and finding its count.")
+    plan = " ".join(parts)
+    by_sub = isinstance(sub, str) and "subtype" in pool and (pool["subtype"] == sub).sum() >= 40
+    return {"rows": rows, "now_plus": round(now_plus), "pool": f"MLB {sub.lower()}s" if by_sub else f"MLB {kind.lower()}s",
+            "plan": plan}
+
+
+# Movement direction (clockwise from straight up toward arm side, degrees). From 2024-25 Statcast,
+# comparing each pitcher's pitch to itself at similar total break (within 2 in), whiffs per swing
+# when it drifts 8-60 deg one way vs his normal. Only pitch types with a clear direction get a call.
+AXIS_RESEARCH = {
+    "Four-seam": {"good": -1, "good_word": "more upright", "bad_word": "drifting arm side",
+                  "stat": "26% whiffs per swing more upright vs 22% at his normal and 17% drifting arm side"},
+    "Cutter": {"good": -1, "good_word": "more cut", "bad_word": "drifting toward ride",
+               "stat": "25% whiffs per swing with more cut vs 22% at his normal"},
+    "Changeup": {"good": +1, "good_word": "more drop", "bad_word": "drifting toward his fastball's direction",
+                 "stat": "35-37% whiffs per swing with more drop vs 32% at his normal and 25-30% toward the fastball"},
+    "Curveball": {"good": -1, "good_word": "more 12-6", "bad_word": "flatter (more sideways)",
+                  "stat": "37-38% whiffs per swing more 12-6 vs 32% at his normal"},
+}
+AXIS_SPLIT_DEG = 12      # a pitch this far off his normal direction counts as a different version
+AXIS_MIN_VERSION = 5     # pitches needed in a version to describe it
+
+
+def clock(angle_deg: float, throws: str) -> str:
+    """Movement direction as a clock face from behind the pitcher (RHP arm side = 3:00 side)."""
+    a = angle_deg if throws != "Left" else -angle_deg
+    minutes = int(round(((a % 360) / 30) * 60 / 15) * 15) % 720
+    h, m = divmod(minutes, 60)
+    return f"{h or 12}:{m:02d}"
+
+
+def spin_axis(pp: pd.DataFrame, kind: str, throws: str) -> dict | None:
+    """
+    Good and bad versions of a pitch inside his own data, from the direction it moves.
+    Rapsodo (like portable TrackMan) gives movement reliably; the direction it moves is the axis here.
+    """
+    d = pp.dropna(subset=["InducedVertBreak", "hb_arm", "RelSpeed"])
+    if len(d) < 15:
+        return None
+    ang = np.degrees(np.arctan2(d["hb_arm"], d["InducedVertBreak"]))
+    med = float(np.degrees(np.arctan2(np.sin(np.radians(ang)).median(), np.cos(np.radians(ang)).median())))
+    dev = (ang - med + 180) % 360 - 180
+    q1, q3 = dev.quantile([0.25, 0.75])
+    out = {"normal": clock(med, throws), "spread_deg": round(float(q3 - q1)), "n": int(len(d))}
+    res = AXIS_RESEARCH.get(kind)
+
+    def version(mask):
+        v = d[mask]
+        if len(v) < AXIS_MIN_VERSION:
+            return None
+        a = float(np.degrees(np.arctan2(v["hb_arm"].mean(), v["InducedVertBreak"].mean())))
+        return {"clock": clock(a, throws), "share": round(100 * len(v) / len(d)), "n": int(len(v)),
+                "ivb": _num(v["InducedVertBreak"].mean()), "hb": _num(v["hb_arm"].mean()), "velo": _num(v["RelSpeed"].mean()),
+                "total": _num(np.hypot(v["InducedVertBreak"], v["hb_arm"]).mean()),
+                "rel_h": _num(v["RelHeight"].mean(), 2) if "RelHeight" in v else None,
+                "rel_s": _num(v["rel_side_arm"].mean(), 2) if "rel_side_arm" in v else None}
+
+    if res is None:
+        out["call"] = None
+        out["note"] = ("The data doesn't show one direction playing better for this pitch type, so this is "
+                       "for reference only.")
+        return out
+    sign = res["good"]
+    good = version(sign * dev >= AXIS_SPLIT_DEG)
+    bad = version(-sign * dev >= AXIS_SPLIT_DEG)
+    normal = version(dev.abs() < AXIS_SPLIT_DEG)
+    out.update({"call": True, "good": good, "bad": bad, "normal_version": normal,
+                "good_word": res["good_word"], "bad_word": res["bad_word"], "why": res["stat"]})
+    if good:
+        out["chase"] = good["clock"]
+    if bad and normal:
+        dv = bad["velo"] - normal["velo"]
+        drel = np.hypot((bad["rel_h"] or 0) - (normal["rel_h"] or 0), (bad["rel_s"] or 0) - (normal["rel_s"] or 0)) * 12
+        if abs(dv) >= 1.0 and drel < 3:
+            out["drift"] = (f"the {bad['clock']} ones are {abs(dv):.1f} mph {'softer' if dv < 0 else 'harder'} from the same "
+                            "release point, so it's effort and the hand, not his body.")
+        elif drel >= 3:
+            out["drift"] = (f"the {bad['clock']} ones come out {drel:.0f} in from his normal release point, so it starts "
+                            "with where his arm is.")
+    return out
+
+
+def swing_split(pp: pd.DataFrame) -> str | None:
+    """What separated his whiffs from contact on this pitch, in game swings."""
+    sw = pp[pp["is_game"] & pp["swing"].fillna(False).astype(bool)]
+    wh, ct = sw[sw["whiff"].fillna(False).astype(bool)], sw[~sw["whiff"].fillna(False).astype(bool)]
+    if len(wh) < 4 or len(ct) < 4:
+        return None
+    diffs = []
+    for col, label, unit, floor in [("RelSpeed", "mph", "mph", 0.8), ("InducedVertBreak", "ride", "in", 1.5),
+                                    ("hb_arm", "arm-side run", "in", 1.5), ("PlateLocHeight", "height at the plate", "ft", 0.3)]:
+        if col not in sw:
+            continue
+        d = wh[col].mean() - ct[col].mean()
+        sd = max(sw[col].std(), 1e-6)
+        if abs(d) >= floor:
+            diffs.append((abs(d) / sd, col, label, unit, d))
+    if not diffs:
+        return f"His {len(wh)} whiffs and {len(ct)} contact swings came on the same version of the pitch."
+    _, col, label, unit, d = max(diffs)
+    if col == "RelSpeed":
+        txt = f"his whiffs came on ones thrown {abs(d):.1f} mph {'harder' if d > 0 else 'slower'} than the ones hitters made contact with"
+    elif col == "PlateLocHeight":
+        txt = f"his whiffs came on ones {abs(d):.1f} ft {'higher' if d > 0 else 'lower'} at the plate than the ones hitters made contact with"
+    else:
+        txt = f"his whiffs came on ones with {abs(d):.1f} in {'more' if d > 0 else 'less'} {label} than the ones hitters made contact with"
+    return f"{txt[0].upper()}{txt[1:]} ({len(wh)} whiffs, {len(ct)} contact)."
+
+
+def _join(words: list[str]) -> str:
+    words = [w.lower() for w in words]
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def arsenal_plan(pitches: list[dict], work: dict | None) -> str:
+    """One sentence, one order of operations (Garnet's arsenal recommendation)."""
+    graded = [p for p in pitches if isinstance(p["grades"]["pitch_plus"], (int, float))]
+    working = [p["pitch"] for p in graded if p.get("verdict") == "Working"]
+    struggling = [p["pitch"] for p in graded if p.get("verdict") == "Struggling"]
+    no_job = [p["pitch"] for p in graded if p.get("verdict") == "No clear job yet"]
+    parts = []
+    if struggling:
+        parts.append(f"No new pitch until his {_join(struggling)} {'is' if len(struggling) == 1 else 'are'} fixed (see "
+                     f"{'its card' if len(struggling) == 1 else 'their cards'}).")
+    elif no_job:
+        parts.append(f"No new pitch until his {_join(no_job)} {'has' if len(no_job) == 1 else 'have'} a defined job.")
+    if working:
+        below = [p for p in graded if p["pitch"] in working and p["grades"]["pitch_plus"] < 100]
+        keep = [w for w in working if w not in [p["pitch"] for p in below]]
+        if keep:
+            parts.append(f"Keep the {_join(keep)} as {'it is' if len(keep) == 1 else 'they are'}.")
+        for p in below:
+            parts.append(f"His {p['pitch'].lower()} is doing its job but grades below average (Pitch+ "
+                         f"{p['grades']['pitch_plus']}); the add-ons on its card are how it gets better.")
+    thin = [p["pitch"] for p in graded if p.get("verdict") in ("Too few game pitches", "Bullpen only")]
+    if thin:
+        parts.append(f"His {_join(thin)} need{'s' if len(thin) == 1 else ''} more game pitches before "
+                     f"{'it' if len(thin) == 1 else 'they'} can be judged.")
+    if graded and all(p.get("verdict") == "Working" for p in graded):
+        parts.insert(0, "Everything he throws is doing a job." if len(graded) > 2 else
+                     "Both pitches are working; the next piece is a third pitch that moves the opposite way of his breaking ball.")
+    return " ".join(parts) if parts else "Not enough game pitches yet to set an arsenal plan."
+
+
 def _fb_setup(df: pd.DataFrame) -> tuple[dict | None, tuple[float, float] | None, pd.DataFrame | None]:
     """Fastball-trait model, this data's VAA calibration, and the D3 velocity scale (each optional)."""
     model = fastball_traits.load()
@@ -761,6 +1082,10 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
         if p.empty or prow.empty:
             continue
         name = display_name(p["Pitcher"].iloc[0])
+        traits = None
+        if fb_model is not None:
+            h = (heights or {}).get(p["Pitcher"].iloc[0])
+            traits = fastball_traits.traits(p, fb_model, fb_offset, h, d3_scale)
         judged, pitches = {}, []
         for idx, r in prow.iterrows():
             kind = r["shape_family"]
@@ -775,8 +1100,6 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
                     "location_plus": _num(r["location"], 0) if pd.notna(r["location"]) else "N/A",
                     "results_plus": _num(r["results"], 0) if pd.notna(r["results"]) else "N/A",
                     "stuff_plus_mlb": _num(r["stuff_mlb"], 0) if pd.notna(r["stuff_mlb"]) else "N/A",
-                    "staff_rank": (f"{fastball_traits.ordinal(r['pitch_plus_rank'])} of {int(r['pitch_plus_of'])}"
-                                   if graded and pd.notna(r.get("pitch_plus_rank")) else "N/A"),
                     "compared_to": {"type": f"other {kind.lower()}s in this file", "group": f"{r['bucket'].lower()}s in this file",
                                     "all": "all pitches in this file", "mlb": f"MLB {kind.lower()}s"}.get(r["stuff_basis"], "N/A"),
                 },
@@ -787,10 +1110,17 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
                 pitches.append(entry)
                 continue
             parts = expl.get(idx, {})
+            entry["results_weight"] = round(100 * r["n_game"] / (r["n_game"] + RESULTS_K))
+            entry["shape"] = {"velo": _num(r["velo"]), "ivb": _num(r["ivb"]), "hb_arm": _num(r["hb"]),
+                              "spin": _num(r["spin"], 0), "velo_diff": _num(r.get("velo_diff")),
+                              "rel_height": _num(r.get("rel_height"), 2)}
             if parts:
                 entry["stuff_explained"] = ", ".join(f"{k} {v:+.0f}" for k, v in parts.items())
+                entry["stuff_parts"] = {k: round(v) for k, v in parts.items()}
                 weakest = min(parts, key=parts.get)
-                if parts[weakest] <= -5:
+                flat_fb = (traits is not None and traits["pitch"] == kind and weakest == "Release"
+                           and traits["vaa_ae_pct_mlb"] >= fastball_traits.HIGH)
+                if parts[weakest] <= -5 and not flat_fb:
                     entry["add_on_idea"] = (f"Optional add-on: {weakest.lower()} is costing the most Stuff points "
                                             f"({parts[weakest]:+.0f}); worth exploring in bullpens.")
             comps = comparable_pitches(r, mlb_rows)
@@ -808,11 +1138,19 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
             pitches.append(entry)
 
         sit = situations(p, ref)
-        traits = None
-        if fb_model is not None:
-            h = (heights or {}).get(p["Pitcher"].iloc[0])
-            traits = fastball_traits.traits(p, fb_model, fb_offset, h, d3_scale)
         dev = development(p, prow, judged, sit, df, traits)
+        throws = p["PitcherThrows"].iloc[0]
+        for e in pitches:
+            if not isinstance(e["grades"]["pitch_plus"], (int, float)):
+                continue
+            row = prow[prow["shape_family"] == e["pitch"]].iloc[0]
+            pp = p[p["shape_family"] == e["pitch"]]
+            e["targets"] = pitch_targets(row, mlb_rows, models, ref)
+            e["spin_axis"] = spin_axis(pp, e["pitch"], throws)
+            e["swing_split"] = swing_split(pp)
+        work = pitch_needing_work(pitches)
+        if work is not None:
+            work["targets"] = next(e.get("targets") for e in pitches if e["pitch"] == work["pitch"])
         report = {
             "pitcher": name, "pitcher_id": str(pid), "throws": p["PitcherThrows"].iloc[0],
             "team": p["PitcherTeam"].dropna().iloc[0] if "PitcherTeam" in p and p["PitcherTeam"].notna().any() else None,
@@ -826,6 +1164,9 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
             "fastball_traits": traits,
             "movement_profile": movement_profile(p, prow),
             "progress": progress(p, prow, ref, models, scale, d3ref),
+            "needs_work": work,
+            "arsenal_plan": arsenal_plan(pitches, work),
+            "points": p[["shape_family", "InducedVertBreak", "hb_arm", "RelSpeed"]].dropna().round(1).to_dict("records"),
         }
         reports.append(report)
     return reports
@@ -886,13 +1227,12 @@ def to_markdown(r: dict) -> str:
         L += ["", "**Priority order**"] + [f"{i}. {x}" for i, x in enumerate(d["priority_order"], 1)]
 
     L += ["", "## Pitch grades", "",
-          "| Pitch | Subtype | n | Game | Usage | Pitch+ | Stuff+ | Location+ | Results+ | Shape+ | Staff rank (Pitch+) |",
-          "|---|---|---|---|---|---|---|---|---|---|---|"]
+          "| Pitch | Subtype | n | Game | Usage | Pitch+ | Stuff+ | Location+ | Results+ | Shape+ |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for p in r["pitch_by_pitch"]:
         g = p["grades"]
         L.append(f"| {p['pitch']} | {_cell(p['subtype'])} | {p['n']} | {p['game_pitches']} | {_cell(p['usage_pct'])}% | "
-                 f"{g['pitch_plus']} | {g['stuff_plus']} | {g['location_plus']} | {g['results_plus']} | {g['shape_plus']} | "
-                 f"{g.get('staff_rank', 'N/A')} |")
+                 f"{g['pitch_plus']} | {g['stuff_plus']} | {g['location_plus']} | {g['results_plus']} | {g['shape_plus']} |")
 
     L += ["", "## Pitch by pitch"]
     for p in r["pitch_by_pitch"]:
