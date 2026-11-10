@@ -65,7 +65,7 @@ export default function SamplePage() {
 
             <div className="mt-8">
               <Link
-                to="/workspace"
+                to="/workspace/session"
                 className="cursor-pointer text-[13px] font-medium text-ink-soft transition-colors hover:text-ink"
               >
                 ← Back to upload

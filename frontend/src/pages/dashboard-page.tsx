@@ -190,7 +190,7 @@ function DashboardHeader({
           </span>
         )}
         <Link
-          to="/workspace"
+          to="/workspace/session"
           className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-surface px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-lime/50"
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -236,7 +236,7 @@ function EmptyState() {
         Upload a Rapsodo pitching CSV to build your dashboards.
       </p>
       <Link
-        to="/workspace"
+        to="/workspace/session"
         className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-full bg-lime px-6 py-2.5 font-semibold text-lime-ink shadow-[0_8px_24px_-8px_rgba(201,242,77,0.6)] transition-colors hover:bg-lime-bright"
       >
         Go to upload

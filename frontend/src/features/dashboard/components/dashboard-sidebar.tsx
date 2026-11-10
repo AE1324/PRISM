@@ -238,7 +238,7 @@ export function DashboardSidebar({
             Session
           </p>
         )}
-        <SideLink to="/workspace" collapsed={collapsed} label="New upload">
+        <SideLink to="/workspace/session" collapsed={collapsed} label="New upload">
           <svg viewBox="0 0 24 24" className="h-5 w-5" {...stroke}>
             <path d="M12 20V8M6 14l6-6 6 6" />
             <path d="M4 4h16" />

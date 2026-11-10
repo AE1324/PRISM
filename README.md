@@ -26,6 +26,20 @@ development dashboards for movement, velocity, release, command, and spin.
 - **Pitch+**, blending stuff, location, and game results
 - Saved sessions, pitcher pages, and season trends
 
+## Staff pages in the workspace
+
+The workspace has a page for every pitcher on the staff (grades, research targets, counts and
+outing-by-outing progress). Player data never goes to the server or GitHub: export a staff file on
+your own computer and load it in the workspace, where it stays in that browser.
+
+```bash
+cd model
+python -m prism_model.export_staff        # writes data/reports/prism_staff_fall_2026.json
+```
+
+Then open the workspace and choose that file. Single Rapsodo sessions still open in the session
+dashboards (`/workspace/session`).
+
 ## Current dashboards
 
 | Panel | What it shows |
