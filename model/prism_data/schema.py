@@ -38,6 +38,7 @@ ID_COLUMNS = [
     "PitchTime",         # timestamp of the pitch when the source has one (used to match sources)
     "Season",
     "PitchNo",           # order within the game or session
+    "PitchUID",          # the source's unique pitch id (used for review decisions and matching)
     "Pitcher",
     "PitcherId",
     "PitcherThrows",     # R | L

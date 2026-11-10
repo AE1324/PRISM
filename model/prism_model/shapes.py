@@ -281,7 +281,7 @@ def assign_subtypes(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFra
     return df.drop(columns="new_family")
 
 
-MERGE_VELO_MPH = 2.5
+MERGE_VELO_MPH = 3.0
 MERGE_MOVEMENT_IN = 5.0
 
 
@@ -292,7 +292,7 @@ def consolidate(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
     A borderline pitch can be labeled two ways from one pitch to the next (a
     sinking four-seam called four-seam on some pitches and sinker on others).
     Within each pitcher and group, a smaller pitch type whose average speed and
-    movement sit on top of a larger one (within 2.5 mph and 5 in) is folded
+    movement sit on top of a larger one (within 3 mph and 5 in) is folded
     into it. Genuinely different pitches (an MLB four-seam and sinker are
     usually ~10 in apart) are left alone.
     """
