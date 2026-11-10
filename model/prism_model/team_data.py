@@ -16,6 +16,7 @@ Files (all inside the gitignored data/ folder)
   data/awre/*PitchData-*.xls                 AWRE pitch logs
   data/rapsodo/review_decisions.csv          saved keep/drop calls (or a filled-in review workbook)
   data/rosters/hitters.csv                   optional: Batter, Bats (R/L/S)
+  data/rosters/inactive_pitchers.txt         optional: one name per line, left out entirely
   -> data/processed/<name>.parquet           all pitches, with issues, exclude flag and results
   -> data/review/<name>_review.xlsx          the review workbook
 
@@ -71,9 +72,17 @@ def add_batter_side(df: pd.DataFrame, path: Path) -> pd.DataFrame:
     return df
 
 
+def inactive(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return {rapsodo.clean_name(x) for x in path.read_text().splitlines() if x.strip()}
+
+
 def build(name: str, rapsodo_dir: Path, awre_dir: Path | None, decisions_path: Path | None,
-          hitters_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+          hitters_path: Path, inactive_path: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+    gone = inactive(inactive_path) if inactive_path else set()
     rap = rapsodo.read_folder(rapsodo_dir)
+    rap = rap[~rap["PitcherId"].isin(gone)].reset_index(drop=True)
     rap = flag_basic(rap)
     rap = classify_clean(rap)
     rap = flag_shapes(rap)
@@ -82,6 +91,7 @@ def build(name: str, rapsodo_dir: Path, awre_dir: Path | None, decisions_path: P
     pairs, awre = None, None
     if awre_dir and any(Path(awre_dir).glob("*PitchData-*.xls*")):
         awre = awre_io.read_folder(awre_dir)
+        awre = awre[~awre["PitcherId"].map(rapsodo.clean_name).isin(gone)].reset_index(drop=True)
         pairs = match(awre, rap)
         rap = merge(awre, rap, pairs)
     rap = add_batter_side(rap, hitters_path)
@@ -168,7 +178,7 @@ def write_review(tables: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     notes = pd.DataFrame({"How to use this workbook": [
         "Flagged pitches: every pitch PRISM thinks is a misread or doesn't belong, with the reason.",
-        "PRISM's call is what happens if you do nothing: likely misreads are dropped from grades; notes (a fixed spin reading, a rare pitch shape) are kept.",
+        "PRISM's call is what happens if you do nothing: likely misreads are dropped from grades; notes (e.g. a one-off pitch moved to his closest pitch type) are kept.",
         "To overrule it, type keep or drop in 'Your call'. Leave it blank to accept PRISM's call.",
         "Send the filled-in workbook back; your calls are saved and re-applied every time the data is rebuilt.",
         "Summary: pitches per pitcher, how many were flagged, and how many AWRE results were matched.",
@@ -209,9 +219,11 @@ def main() -> None:
     parser.add_argument("--awre", default=str(DATA_DIR / "awre"))
     parser.add_argument("--decisions", default=str(DATA_DIR / "rapsodo" / "review_decisions.csv"))
     parser.add_argument("--hitters", default=str(DATA_DIR / "rosters" / "hitters.csv"))
+    parser.add_argument("--inactive", default=str(DATA_DIR / "rosters" / "inactive_pitchers.txt"))
     args = parser.parse_args()
 
-    df, awre, pairs = build(args.name, Path(args.rapsodo), Path(args.awre), Path(args.decisions), Path(args.hitters))
+    df, awre, pairs = build(args.name, Path(args.rapsodo), Path(args.awre), Path(args.decisions), Path(args.hitters),
+                             Path(args.inactive))
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     out = df.copy()
     out["issues"] = out["issues"].map(lambda f: "; ".join(f))

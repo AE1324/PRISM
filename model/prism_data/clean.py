@@ -14,11 +14,12 @@ Checks before classification
   impossible       speed, spin, movement or release outside what a pitcher can do
   wrong hand       released from the opposite side to every other pitch he throws
   release point    far from his release point in that stint
-  spin misread     (note) almost no spin but real movement: the spin reading is ignored,
-                   the pitch is kept (the ball can't move like that without spin)
+  spin misread     almost no spin with real movement (the ball can't move like that
+                   without spin), or a spin value outside what's possible
 Checks after classification (pitch type assigned by shape)
   shape outlier    nothing like his other pitches of the same type
-  one-off shape    (note) a pitch type he threw only once or twice
+  one-off shape    a pitch type he threw only once or twice: moved to his closest regular
+                   pitch type when it looks like one (a note), otherwise a misread
   movement reads   Rapsodo's flight-based and spin-based movement disagree far more than
                    usual for his pitches of that type
 """
@@ -59,9 +60,7 @@ def flag_basic(df: pd.DataFrame) -> pd.DataFrame:
     total0 = np.hypot(ivb0, hb0)
     # Spin misreads: almost no spin with real movement, or an impossible spin value. Keep the pitch, drop the reading.
     bad_spin = (((spin < 700) & (total0 > 8) & (v > 60)) | ~spin.between(*SPIN_RANGE)) & spin.notna()
-    _add(notes, bad_spin, lambda i: f"spin misread ({spin[i]:.0f} rpm with {total0[i]:.0f} in of movement); spin ignored, pitch kept")
-    df.loc[bad_spin, "SpinRate"] = np.nan
-    spin = df["SpinRate"]
+    _add(flags, bad_spin, lambda i: f"impossible spin reading ({spin[i]:.0f} rpm with {total0[i]:.0f} in of movement)")
     ivb, hb = df["InducedVertBreak"], df["HorzBreak"]
 
     if "PitchUID" in df:
@@ -95,34 +94,71 @@ def flag_basic(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+ONE_OFF_MAX = 2          # a pitch type thrown this few times (by someone with 30+ pitches) is a one-off
+REASSIGN_Z = 3.0         # a one-off joins his nearest regular pitch type if it's within this many spreads of it
+
+
+def _type_stats(g: pd.DataFrame, cols: list[str]) -> tuple[pd.Series, pd.Series]:
+    center = g[cols].median()
+    scale = pd.Series({c: max(_mad(g[c]), SHAPE_FLOOR[c]) for c in cols})
+    return center, scale
+
+
 def flag_shapes(df: pd.DataFrame, by: str = "PitcherId") -> pd.DataFrame:
-    """Checks that need ``shape_family`` (PRISM's pitch type)."""
+    """
+    Checks that need ``shape_family`` (PRISM's pitch type), in this order:
+      1. One-off pitch types: moved to the pitcher's closest regular pitch type
+         when they look like it, otherwise flagged as a misread.
+      2. Pitches nothing like his others of the same type.
+      3. Rapsodo's two movement reads disagreeing far more than usual for that pitch type.
+    """
     df = df.copy()
-    flags = df["issues"].copy() if "issues" in df else pd.Series([[] for _ in range(len(df))], index=df.index, dtype=object)
-    notes = df["notes"].copy() if "notes" in df else pd.Series([[] for _ in range(len(df))], index=df.index, dtype=object)
+    empty = lambda: pd.Series([[] for _ in range(len(df))], index=df.index, dtype=object)  # noqa: E731
+    flags = df["issues"].copy() if "issues" in df else empty()
+    notes = df["notes"].copy() if "notes" in df else empty()
     ok = df["shape_family"].notna() & df["RelSpeed"].notna()
     cols = list(SHAPE_FLOOR)
+    label = {"RelSpeed": "velocity", "InducedVertBreak": "vertical break", "hb_arm": "horizontal break"}
+
+    # 1. One-off pitch types.
+    for pid, g in df[ok].groupby(by):
+        counts = g["shape_family"].value_counts()
+        if len(g) < 30:
+            continue
+        regular = [k for k, n in counts.items() if n >= 5]
+        stats = {k: _type_stats(g[g["shape_family"] == k], cols) for k in regular}
+        for kind, n in counts.items():
+            if n > ONE_OFF_MAX:
+                continue
+            for i in g.index[g["shape_family"] == kind]:
+                best, best_z = None, np.inf
+                for k, (center, scale) in stats.items():
+                    z = float(((df.loc[i, cols].astype(float) - center) / scale).abs().max())
+                    if z < best_z:
+                        best, best_z = k, z
+                if best is not None and best_z <= REASSIGN_Z:
+                    donor = g[g["shape_family"] == best].iloc[0]
+                    for col in ("shape_family", "subtype", "bucket"):
+                        if col in df:
+                            df.at[i, col] = donor[col]
+                    notes.at[i] = notes.at[i] + [f"one-off {kind.lower()} shape; moved to his {best.lower()} (closest match)"]
+                else:
+                    flags.at[i] = flags.at[i] + [f"one-off {kind.lower()} shape that matches none of his pitches"]
+
+    # 2. Unlike his other pitches of the same type.
     for (pid, kind), g in df[ok].groupby([by, "shape_family"]):
         if len(g) < 6:
             continue
-        center = g[cols].median()
-        scale = pd.Series({c: max(_mad(g[c]), SHAPE_FLOOR[c]) for c in cols})
+        center, scale = _type_stats(g, cols)
         z = ((g[cols] - center) / scale).abs()
         worst = z.max(axis=1)
         for i in worst[worst > SHAPE_Z].index:
             col = z.loc[i].idxmax()
-            label = {"RelSpeed": "velocity", "InducedVertBreak": "vertical break", "hb_arm": "horizontal break"}[col]
             unit = "mph" if col == "RelSpeed" else "in"
-            flags.at[i] = flags.at[i] + [f"unlike his other {kind.lower()}s ({label} {df.at[i, col]:.1f} vs usual "
+            flags.at[i] = flags.at[i] + [f"unlike his other {kind.lower()}s ({label[col]} {df.at[i, col]:.1f} vs usual "
                                          f"{center[col]:.1f} {unit})"]
-    # One-off pitch types: thrown once or twice by someone with a real sample.
-    counts = df[ok].groupby([by, "shape_family"]).size()
-    totals = df[ok].groupby(by).size()
-    for (pid, kind), n in counts.items():
-        if n <= 2 and totals[pid] >= 30:
-            for i in df[ok & (df[by] == pid) & (df["shape_family"] == kind)].index:
-                notes.at[i] = notes.at[i] + [f"one-off {kind.lower()} shape (only {n} of {totals[pid]} pitches)"]
-    # Rapsodo's two movement reads disagree far more than usual for this pitcher and pitch type
+
+    # 3. Rapsodo's two movement reads disagree far more than usual for this pitcher and pitch type
     # (the normal gap differs a lot by pitch type, e.g. gyro sliders).
     if {"vb_spin", "hb_spin", "movement_source"} <= set(df.columns):
         traj = df["movement_source"] == "trajectory"

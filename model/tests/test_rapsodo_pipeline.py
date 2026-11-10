@@ -89,8 +89,7 @@ def test_basic_flags():
     assert "no velocity read" in out.at[0, "issues"]
     assert any("wrong side" in s for s in out.at[1, "issues"])
     assert any("release point" in s for s in out.at[2, "issues"])
-    assert out.at[3, "issues"] == [] and any("spin misread" in s for s in out.at[3, "notes"])
-    assert np.isnan(out.at[3, "SpinRate"])                      # misread spin dropped, pitch kept
+    assert any("impossible spin" in s for s in out.at[3, "issues"])
     assert out.loc[4:, "issues"].map(len).sum() == 0
 
 
@@ -121,3 +120,16 @@ def test_match_and_merge_attach_results():
     out = merge(awre, rap, pairs)
     assert out["PitchCall"].tolist()[0] == "StrikeCalled" and pd.isna(out["PitchCall"].iloc[1])
     assert out["PlayResult"].iloc[2] == "Single"
+
+
+def test_one_off_shapes_join_a_close_pitch_or_get_dropped():
+    df = flag_basic(_pitch_frame(n=40))
+    df["shape_family"], df["subtype"], df["bucket"] = "Four-seam", "Ride", "Fastball"
+    df.loc[30:39, ["shape_family", "subtype", "bucket"]] = ["Slider", "Gyro", "Breaking"]
+    df.loc[30:39, ["RelSpeed", "InducedVertBreak", "hb_arm"]] = [76.0, 1.0, -4.0]
+    df.loc[0, ["shape_family", "RelSpeed", "InducedVertBreak", "hb_arm"]] = ["Cutter", 83.0, 14.0, 8.0]   # basically his four-seam
+    df.loc[1, ["shape_family", "RelSpeed", "InducedVertBreak", "hb_arm"]] = ["Changeup", 70.0, 25.0, 25.0]  # matches nothing
+    out = flag_shapes(df)
+    assert out.at[0, "shape_family"] == "Four-seam" and out.at[0, "issues"] == []
+    assert any("moved to his four-seam" in s for s in out.at[0, "notes"])
+    assert any("matches none of his pitches" in s for s in out.at[1, "issues"])
