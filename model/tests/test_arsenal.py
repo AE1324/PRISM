@@ -170,7 +170,7 @@ def staff(seed=3):
 
 @pytest.fixture(scope="module")
 def reports():
-    return {r["pitcher_id"]: r for r in analyze(staff(), fake_ref(), fake_mlb_rows(), fake_models())}
+    return {r["pitcher_id"]: r for r in analyze(staff(), fake_ref(), fake_mlb_rows(), fake_models(), scale="group")}
 
 
 def test_every_pitcher_gets_a_full_report(reports):

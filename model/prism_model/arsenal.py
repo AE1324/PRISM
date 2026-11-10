@@ -41,7 +41,7 @@ import numpy as np
 import pandas as pd
 
 from prism_data.paths import DATA_DIR
-from prism_model import fastball_traits, references
+from prism_model import d3, fastball_traits, references
 from prism_model.references import RATE_COLUMNS, add_flags, num, location_score, result_values, results_score
 from prism_model.shapes import BUCKET
 from prism_model.stuff import GROUPS, aggregate, predict, to_plus
@@ -56,6 +56,8 @@ RESULTS_K = 15              # Pitch+ trusts Results n / (n + 15)
 FADE_AFTER = 25
 MIN_GAME_FOR_VERDICT = 15
 CLIP = (40.0, 160.0)
+D3_RATES = ["strike", "whiff"]  # rates with a D3 reference from Synergy
+OPTIONAL_COLUMNS = ["ExitSpeed", "Angle", "PitcherTeam", "TaggedHitType", "PlayResult", "KorBB"]
 
 COMPONENTS = {
     "Velo": ["perceived_velo"],
@@ -176,6 +178,11 @@ def staff_rescale(rows: pd.DataFrame, col: str, min_peers: int = MIN_PEERS) -> p
 def prepare(df: pd.DataFrame, ref: dict) -> pd.DataFrame:
     """Add result values, per-pitch flags, outing keys and pitch number within the outing."""
     df = df.copy()
+    for col in OPTIONAL_COLUMNS:  # e.g. Rapsodo + AWRE data has no exit velocity
+        if col not in df:
+            df[col] = np.nan
+    for col in ("Balls", "Strikes"):  # counts stored as floats would read "0.0-0.0"
+        df[col] = pd.to_numeric(df[col], errors="coerce").round().astype("Int64")
     df["result_rv"] = result_values(df, ref["results"])
     df = add_flags(df, ref.get("hard_hit_mph", references.HARD_HIT_MPH))
     df["outing"] = df["Date"].astype("string").fillna("unknown")
@@ -188,12 +195,36 @@ def prepare(df: pd.DataFrame, ref: dict) -> pd.DataFrame:
 # --------------------------------------------------------------------------
 # Grades
 # --------------------------------------------------------------------------
-def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "group") -> pd.DataFrame:
+def d3_stuff(rows: pd.DataFrame, models: dict | None, d3ref: dict | None,
+             shifts: dict | None = None) -> pd.DataFrame:
+    """
+    Predict Stuff/Shape xRV. With a D3 reference, velocities are first moved to their MLB
+    equivalent by D3 percentile (``d3.translate``; or by the given per-pitcher ``shifts``),
+    and the velocity part of fastball Stuff is weighted by the D3 velocity weight.
+    """
+    if d3ref is not None:
+        if shifts is None:
+            rows = d3.translate(rows, d3ref)
+        else:
+            rows = rows.copy()
+            rows["perceived_velo_d3"] = rows["perceived_velo"]
+            rows["velo_shift"] = rows["PitcherId"].map(shifts).fillna(0.0)
+            rows["perceived_velo"] = rows["perceived_velo"] + rows["velo_shift"]
+    rows = predict(rows, models)
+    if d3ref is not None:
+        fb = rows["group"] == "Fastball"
+        w = d3ref["velo_weight"]
+        rows.loc[fb, "stuff_xrv"] = rows.loc[fb, "shape_xrv"] + w * (rows.loc[fb, "stuff_xrv"] - rows.loc[fb, "shape_xrv"])
+    return rows
+
+
+def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d3",
+               d3ref: dict | None = None) -> pd.DataFrame:
     """One row per pitcher pitch type with Stuff, Shape, Location, Results and Pitch+."""
     by = ["PitcherId", "shape_family"]
     rows = aggregate(df, by=by, min_pitches=1)
     rows["bucket"] = rows["shape_family"].map(BUCKET)
-    rows = predict(rows, models)
+    rows = d3_stuff(rows, models, d3ref if scale == "d3" else None)
     rows = rows.merge(location_score(df, by), on=by, how="left").merge(results_score(df, by), on=by, how="left")
     rows["n_located"] = rows["n_located"].fillna(0).astype(int)
     rows["n_game"] = rows["n_game"].fillna(0).astype(int)
@@ -218,7 +249,7 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "g
     rows["results_mlb"] = mlb("results_rv100", "results_rv100", False).where(graded & (rows["n_game"] > 0))
 
     for comp in ["stuff", "shape", "location", "results"]:
-        if scale == "mlb":
+        if scale in ("mlb", "d3"):
             rows[comp] = rows[f"{comp}_mlb"]
             rows[f"{comp}_basis"], rows[f"{comp}_mean"], rows[f"{comp}_sd"] = "mlb", 100.0, 10.0
         else:
@@ -230,6 +261,11 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "g
         for s, l, r, g, n in zip(rows["stuff"], rows["location"], rows["results"], rows["n_game"], rows["n"])
     ]
     rows["pitch_plus"] = rows["pitch_plus"].astype(float)
+
+    # Where each pitch ranks on the staff among the same pitch type.
+    for comp in ["pitch_plus", "stuff"]:
+        rows[f"{comp}_rank"] = rows.groupby("shape_family")[comp].rank(ascending=False, method="min")
+        rows[f"{comp}_of"] = rows.groupby("shape_family")[comp].transform("count")
     return rows
 
 
@@ -277,9 +313,11 @@ def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
     pool = mlb_rows[mlb_rows["shape_family"] == r["shape_family"]].dropna(subset=["xrv100"])
     if pool.empty or pd.isna(r["velo"]):
         return None
+    shift = r.get("velo_shift", 0.0)
+    velo = r["velo"] + (shift if pd.notna(shift) else 0.0)  # D3-equivalent MLB speed when translated
     type_avg = np.average(pool["xrv100"], weights=pool["n"])
     for dv, dm in ((1.5, 2.0), (2.5, 3.0), (4.0, 4.0)):
-        near = pool[((pool["velo"] - r["velo"]).abs() <= dv) & ((pool["ivb"] - r["ivb"]).abs() <= dm)
+        near = pool[((pool["velo"] - velo).abs() <= dv) & ((pool["ivb"] - r["ivb"]).abs() <= dm)
                     & ((pool["hb"] - r["hb"]).abs() <= dm)]
         if len(near) >= 25:
             break
@@ -292,7 +330,10 @@ def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
         "pitches": int(near["n"].sum()),
         "window": f"±{dv:g} mph, ±{dm:g} in",
         "runs_per_100_vs_avg": round(float(diff), 2),
-        "text": (f"{len(near)} comparable MLB {r['shape_family'].lower()}s (±{dv:g} mph, ±{dm:g} in of movement) "
+        "mlb_equivalent_velo": round(float(velo), 1),
+        "text": (f"{len(near)} comparable MLB {r['shape_family'].lower()}s "
+                 + (f"(around {velo:.0f} mph, his D3-equivalent speed, " if abs(velo - r['velo']) >= 0.5 else "(")
+                 + f"±{dv:g} mph, ±{dm:g} in of movement) "
                  f"allowed {abs(diff):.2f} {word} runs per 100 pitches than the average MLB {r['shape_family'].lower()}."),
     }
 
@@ -300,11 +341,12 @@ def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
 # --------------------------------------------------------------------------
 # Rates, jobs and verdicts
 # --------------------------------------------------------------------------
-def rate_table(df: pd.DataFrame, ref: dict) -> pd.DataFrame:
+def rate_table(df: pd.DataFrame, ref: dict, d3ref: dict | None = None) -> pd.DataFrame:
     """
-    Each pitcher pitch type's rates, next to a reference rate: the same pitch
-    type thrown by the other pitchers in the file (if at least two others
-    throw it), otherwise MLB.
+    Each pitcher pitch type's rates, next to a reference rate. With a D3
+    reference, strike% and whiff% compare to D3 averages for the pitch type
+    (Synergy); other rates compare to the same pitch type thrown by the other
+    pitchers in the file (if at least two others throw it), otherwise MLB.
     """
     by = ["PitcherId", "shape_family"]
     rates = df.groupby(by)[RATE_COLUMNS].agg(["mean", "count"])
@@ -329,6 +371,12 @@ def rate_table(df: pd.DataFrame, ref: dict) -> pd.DataFrame:
         else:
             for col in RATE_COLUMNS:
                 rates.loc[i, f"{col}_ref"] = mlb.get(col, np.nan)
+        if d3ref is not None:
+            for col in D3_RATES:
+                v = d3.d3_rate(kind, col, d3ref)
+                if pd.notna(v):
+                    rates.loc[i, f"{col}_ref"] = v
+                    rates.loc[i, f"{col}_basis"] = "D3"
     return rates
 
 
@@ -338,7 +386,8 @@ def judge_pitch(row: pd.Series, rates: pd.Series) -> dict:
     ref_word = f"{'staff' if rates['ref_basis'] == 'staff' else 'MLB'} {kind}s"
 
     def line(col):
-        return f"{RATE_LABEL[col].capitalize()} {_pct(rates[f'{col}_rate']):.0f}% vs {_pct(rates[f'{col}_ref']):.0f}% for {ref_word}"
+        word = f"D3 {kind}s" if rates.get(f"{col}_basis") == "D3" else ref_word
+        return f"{RATE_LABEL[col].capitalize()} {_pct(rates[f'{col}_rate']):.0f}% vs {_pct(rates[f'{col}_ref']):.0f}% for {word}"
 
     calls = {c: clearly(rates[f"{c}_rate"], rates[f"{c}_ref"], rates[f"{c}_n"], RATE_MIN_N[c]) for c in RATE_COLUMNS}
     jobs = [{"job": name, "does": does, "evidence": line(c)} for c, good, name, does in JOBS if calls[c] == good]
@@ -458,12 +507,16 @@ def situations(p: pd.DataFrame, ref: dict) -> dict:
 # --------------------------------------------------------------------------
 # Progress through the season
 # --------------------------------------------------------------------------
-def progress(p: pd.DataFrame, season: pd.DataFrame, ref: dict, models: dict | None, scale: str) -> list[dict]:
+def progress(p: pd.DataFrame, season: pd.DataFrame, ref: dict, models: dict | None, scale: str,
+             d3ref: dict | None = None) -> list[dict]:
     by = ["PitcherId", "outing", "shape_family"]
     sess = aggregate(p, by=by, min_pitches=1)
     if sess.empty:
         return []
-    sess = predict(sess, models)
+    shifts = None
+    if "velo_shift" in season and season["velo_shift"].notna().any():
+        shifts = {season["PitcherId"].iloc[0]: float(season["velo_shift"].iloc[0])}
+    sess = d3_stuff(sess, models, d3ref if scale == "d3" else None, shifts)
     out = []
     for _, r in sess.sort_values(["outing", "n"], ascending=[True, False]).iterrows():
         s = ref["scale"].get(r["shape_family"], {})
@@ -662,7 +715,7 @@ def summary_sentence(name: str, dev: dict, judged: dict, rows: pd.DataFrame) -> 
         parts.append(f"his best-graded pitch is the {graded.iloc[0]['shape_family'].lower()} "
                      f"({graded.iloc[0]['pitch_plus']:.0f} Pitch+)")
     if dev["priority_order"]:
-        step = dev["priority_order"][0].rstrip(".")
+        step = dev["priority_order"][0].split(" (")[0].split(":")[0].split(";")[0].rstrip(".")
         parts.append(f"the next step is: {step[0].lower() + step[1:]}")
     return "; ".join(parts) + "."
 
@@ -683,7 +736,7 @@ def _fb_setup(df: pd.DataFrame) -> tuple[dict | None, tuple[float, float] | None
 
 
 def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | None = None,
-            scale: str = "group", pitchers: list[str] | None = None,
+            scale: str = "d3", pitchers: list[str] | None = None,
             heights: dict | None = None) -> list[dict]:
     """
     Reports for every pitcher in a classified PRISM-format frame (see ``build_reports`` for raw files).
@@ -691,11 +744,14 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
     """
     df = prepare(df[df["shape_family"].notna()], ref)
     fb_model, fb_offset, d3_scale = _fb_setup(df)
-    rows = grade_rows(df, ref, models, scale)
+    d3ref = d3.load() if scale == "d3" else None
+    if scale == "d3" and d3ref is None:
+        scale = "mlb"
+    rows = grade_rows(df, ref, models, scale, d3ref)
     middle = df[df["located"]].groupby(["PitcherId", "shape_family"])["middle"].mean().rename("middle").reset_index()
     rows = rows.merge(middle, on=["PitcherId", "shape_family"], how="left")
     expl = explain_stuff(rows, ref, models) if rows["stuff"].notna().any() else {}
-    rates = rate_table(df, ref).set_index(["PitcherId", "shape_family"])
+    rates = rate_table(df, ref, d3ref).set_index(["PitcherId", "shape_family"])
 
     reports = []
     ids = pitchers or rows["PitcherId"].unique().tolist()
@@ -719,6 +775,8 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
                     "location_plus": _num(r["location"], 0) if pd.notna(r["location"]) else "N/A",
                     "results_plus": _num(r["results"], 0) if pd.notna(r["results"]) else "N/A",
                     "stuff_plus_mlb": _num(r["stuff_mlb"], 0) if pd.notna(r["stuff_mlb"]) else "N/A",
+                    "staff_rank": (f"{fastball_traits.ordinal(r['pitch_plus_rank'])} of {int(r['pitch_plus_of'])}"
+                                   if graded and pd.notna(r.get("pitch_plus_rank")) else "N/A"),
                     "compared_to": {"type": f"other {kind.lower()}s in this file", "group": f"{r['bucket'].lower()}s in this file",
                                     "all": "all pitches in this file", "mlb": f"MLB {kind.lower()}s"}.get(r["stuff_basis"], "N/A"),
                 },
@@ -759,7 +817,7 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
             "pitcher": name, "pitcher_id": str(pid), "throws": p["PitcherThrows"].iloc[0],
             "team": p["PitcherTeam"].dropna().iloc[0] if "PitcherTeam" in p and p["PitcherTeam"].notna().any() else None,
             "pitches": int(len(p)), "game_pitches": int(p["is_game"].sum()), "outings": int(p["outing"].nunique()),
-            "scale": "MLB" if scale == "mlb" else "pitchers in this file",
+            "scale": {"d3": "D3", "mlb": "MLB"}.get(scale, "pitchers in this file"),
             "summary": summary_sentence(name, dev, judged, prow),
             "development": dev,
             "pitch_by_pitch": pitches,
@@ -767,7 +825,7 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
             "fastball_role": fastball_role(prow, traits),
             "fastball_traits": traits,
             "movement_profile": movement_profile(p, prow),
-            "progress": progress(p, prow, ref, models, scale),
+            "progress": progress(p, prow, ref, models, scale, d3ref),
         }
         reports.append(report)
     return reports
@@ -798,10 +856,18 @@ def _avg(v):
     return "–" if v is None else f"{v:.3f}".lstrip("0")
 
 
+SCALE_NOTE = {
+    "D3": ("Grades: 100 = average, 10 = one standard deviation. Velocity is judged against D3 pitchers "
+           "(moved to the MLB velocity at the same D3 percentile); pitch shape, location and results are judged "
+           "against MLB pitches of the same type, so 100 means an average MLB pitch of that type at his D3-equivalent "
+           "velocity. Strike and whiff rates are compared with D3 averages."),
+}
+
+
 def to_markdown(r: dict) -> str:
     L = [f"# {r['pitcher']} ({r['throws']}HP)", "",
          f"{r['pitches']} pitches ({r['game_pitches']} in games) over {r['outings']} outing(s). "
-         f"Grades: 100 = average for {r['scale']}.", "", f"**{r['summary']}**", ""]
+         + SCALE_NOTE.get(r["scale"], f"Grades: 100 = average for {r['scale']}."), "", f"**{r['summary']}**", ""]
 
     d = r["development"]
     L += ["## Development", "",
@@ -820,12 +886,13 @@ def to_markdown(r: dict) -> str:
         L += ["", "**Priority order**"] + [f"{i}. {x}" for i, x in enumerate(d["priority_order"], 1)]
 
     L += ["", "## Pitch grades", "",
-          "| Pitch | Subtype | n | Game | Usage | Pitch+ | Stuff+ | Location+ | Results+ | Shape+ | Stuff+ (MLB) |",
+          "| Pitch | Subtype | n | Game | Usage | Pitch+ | Stuff+ | Location+ | Results+ | Shape+ | Staff rank (Pitch+) |",
           "|---|---|---|---|---|---|---|---|---|---|---|"]
     for p in r["pitch_by_pitch"]:
         g = p["grades"]
         L.append(f"| {p['pitch']} | {_cell(p['subtype'])} | {p['n']} | {p['game_pitches']} | {_cell(p['usage_pct'])}% | "
-                 f"{g['pitch_plus']} | {g['stuff_plus']} | {g['location_plus']} | {g['results_plus']} | {g['shape_plus']} | {g['stuff_plus_mlb']} |")
+                 f"{g['pitch_plus']} | {g['stuff_plus']} | {g['location_plus']} | {g['results_plus']} | {g['shape_plus']} | "
+                 f"{g.get('staff_rank', 'N/A')} |")
 
     L += ["", "## Pitch by pitch"]
     for p in r["pitch_by_pitch"]:

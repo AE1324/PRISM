@@ -191,7 +191,7 @@ def traits(p: pd.DataFrame, model: dict, offset: tuple[float, float], height: fl
             text += (f"; at {int(height)}'{round((height % 1) * 12)}\" he'd typically get about "
                      f"{out['expected_extension_ft']:.1f} ft, so this looks mechanical (stride/landing), not size")
         gain = MPH_PER_FT * max(MLB_AVG_EXTENSION_FT - ext, 0.5)
-        limits.append((text, f"Work on extension (stride length, getting down the mound): each half foot gained plays "
+        limits.append((text, f"Gain extension (stride length, getting down the mound): each half foot gained plays "
                              f"like ~{MPH_PER_FT / 2:.1f} mph; reaching MLB-average extension would be worth ~{gain:.1f} mph perceived."))
     elif height and ext < out["expected_extension_ft"] - 0.4:
         gap = out["expected_extension_ft"] - ext
