@@ -29,7 +29,8 @@ def write_export(tmp_path, flip=False):
 def test_reads_into_prism_format(tmp_path):
     df = read_trackman(write_export(tmp_path))
     assert list(df.columns) == ALL_COLUMNS
-    assert len(df) == 30                      # the low-confidence pitch is dropped
+    assert len(df) == 31                      # the low-confidence pitch is kept...
+    assert df["InducedVertBreak"].isna().sum() == 1   # ...with its movement blanked
     assert set(df["PitchCall"]) == {"BallCalled", "StrikeCalled"}
     assert df["Season"].dropna().unique().tolist() == [2023]
 

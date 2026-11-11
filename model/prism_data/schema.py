@@ -88,9 +88,9 @@ ALL_COLUMNS = ID_COLUMNS + PHYSICS_COLUMNS + OUTCOME_COLUMNS + NORMALIZED_COLUMN
 
 # TrackMan horizontal sign convention, expressed relative to a right-handed
 # pitcher's arm side: +1 means a positive raw value is arm side for a RHP.
-# TODO(verify): confirm against a real TrackMan export before training on
-# TrackMan data. Statcast-derived data is converted using physical directions
-# (see statcast.py), so only these constants depend on the assumption.
+# Confirmed on real TrackMan V3 game exports (NECBL, June 2026): right-handers'
+# fastballs show positive HorzBreak and positive RelSide; left-handers mirrored.
+# Statcast-derived data is converted using physical directions (see statcast.py).
 TRACKMAN_SIGNS = {
     "HorzBreak": +1,
     "RelSide": +1,

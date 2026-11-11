@@ -65,8 +65,16 @@ def check_signs(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+MOVEMENT = ["SpinAxis", "Tilt", "VertBreak", "InducedVertBreak", "HorzBreak", "pfxx", "pfxz"]
+RELEASE = ["RelHeight", "RelSide", "Extension", "VertRelAngle", "HorzRelAngle"]
+
+
 def read_trackman(path: str | Path) -> pd.DataFrame:
-    raw = pd.read_csv(path, low_memory=False)
+    path = Path(path)
+    if path.suffix.lower() in (".xlsx", ".xls"):
+        raw = pd.read_excel(path)  # TrackMan's Excel export: same columns as the CSV
+    else:
+        raw = pd.read_csv(path, low_memory=False)
     df = raw.copy()
 
     df["Source"] = "trackman"
@@ -91,9 +99,14 @@ def read_trackman(path: str | Path) -> pd.DataFrame:
     if "KorBB" in df:
         df["KorBB"] = df["KorBB"].replace({"Undefined": pd.NA}).fillna("Undefined")
 
-    # Drop pitches TrackMan itself had low confidence in, when it reports that.
-    if "PitchMovementConfidence" in df:
-        df = df[df["PitchMovementConfidence"].fillna("High") != "Low"]
+    # Where TrackMan reports low confidence, blank only those measurements. The pitch still counts:
+    # its speed, location and result are valid (dropping it would lose real game results).
+    for conf, cols in (("PitchMovementConfidence", MOVEMENT), ("PitchReleaseConfidence", RELEASE)):
+        if conf in df:
+            low = df[conf].astype(str).eq("Low")
+            for c in cols:
+                if c in df:
+                    df.loc[low, c] = np.nan
 
     df = df.dropna(subset=["RelSpeed"])
     # Check the sign convention using pitchers with a recorded hand, then use the
