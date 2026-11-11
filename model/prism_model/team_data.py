@@ -34,7 +34,8 @@ import pandas as pd
 
 from prism_data import awre as awre_io
 from prism_data import rapsodo
-from prism_data.clean import apply_decisions, flag_basic, flag_shapes, load_decisions
+from prism_data.clean import apply_decisions, attribute_wrong_pitcher, flag_basic, flag_shapes, load_decisions
+from prism_data.trackman import read_trackman
 from prism_data.match import match, merge
 from prism_data.paths import DATA_DIR, PROCESSED_DIR
 from prism_data.schema import ALL_COLUMNS
@@ -97,6 +98,37 @@ def build(name: str, rapsodo_dir: Path, awre_dir: Path | None, decisions_path: P
         rap = merge(awre, rap, pairs)
     rap = add_batter_side(rap, hitters_path)
     return rap, awre, pairs
+
+
+def build_trackman(folder: Path, decisions_path: Path | None = None, team: str | None = None,
+                   inactive_path: Path | None = None) -> pd.DataFrame:
+    """
+    TrackMan game exports through the same cleaning as Rapsodo: read every .csv/.xlsx export, keep one
+    team's pitchers (``team`` = TrackMan PitcherTeam code), flag misreads per pitcher per game (release
+    point checks use each game as its own stint), name the likely pitcher for wrong-side pitches, classify
+    the clean pitches, flag shape outliers, then apply saved review decisions. Results come from the
+    export itself (count, call, exit velocity, launch angle), so there's no matching step.
+    """
+    gone = inactive(inactive_path) if inactive_path else set()
+    files = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in (".csv", ".xlsx") and not p.name.startswith("~"))
+    frames = []
+    for f in files:
+        try:
+            frames.append(read_trackman(f).assign(source_file=f.name))
+        except (KeyError, ValueError):
+            continue  # not a pitch-by-pitch export (e.g. a summary workbook)
+    df = pd.concat(frames, ignore_index=True)
+    if team:
+        df = df[df["PitcherTeam"].astype(str) == team]
+    df = df[~df["Pitcher"].map(rapsodo.clean_name).isin(gone)].reset_index(drop=True)
+    df["stint"] = df["PitcherId"].astype(str) + "|" + df["GameID"].astype(str)
+    if "PitchTime" not in df or df["PitchTime"].isna().all():
+        df["PitchTime"] = pd.to_datetime(df["Date"].astype(str), errors="coerce")
+    df = flag_basic(df)
+    df = attribute_wrong_pitcher(df)
+    df = classify_clean(df)
+    df = flag_shapes(df)
+    return apply_decisions(df, load_decisions(decisions_path) if decisions_path else {})
 
 
 # --------------------------------------------------------------------------

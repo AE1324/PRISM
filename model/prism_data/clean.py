@@ -13,6 +13,8 @@ Checks before classification
   no movement      neither trajectory nor spin movement was read
   impossible       speed, spin, movement or release outside what a pitcher can do
   wrong hand       released from the opposite side to every other pitch he throws
+  wrong pitcher    (game data) a wrong-side pitch whose release matches another pitcher in the
+                   same game: named in the flag, since the operator likely didn't switch pitchers
   release point    far from his release point in that stint
   spin misread     almost no spin with real movement (the ball can't move like that
                    without spin), or a spin value outside what's possible
@@ -178,6 +180,40 @@ def flag_shapes(df: pd.DataFrame, by: str = "PitcherId") -> pd.DataFrame:
 # --------------------------------------------------------------------------
 # Decisions
 # --------------------------------------------------------------------------
+WRONG_PITCHER_MAX_FT = 0.5  # release point within this of another pitcher's in the same game
+
+
+def attribute_wrong_pitcher(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    For game data: when a pitch was released from the wrong side for the pitcher it's logged under,
+    find who in that game actually releases from there (nearest median release point among pitchers of
+    that hand, within WRONG_PITCHER_MAX_FT) and add "likely thrown by <name>" to the flag. The pitch
+    stays out of grades either way; this tells the reviewer what happened (usually the operator didn't
+    switch pitchers at a change).
+    """
+    if "GameID" not in df or "issues" not in df:
+        return df
+    df = df.copy()
+    wrong = df["issues"].map(lambda f: any(str(x).startswith("released from the wrong side") for x in f))
+    if not wrong.any():
+        return df
+    clean = df[df["issues"].map(len) == 0]
+    rel = clean.groupby(["GameID", "PitcherId"]).agg(
+        name=("Pitcher", "first"), hand=("PitcherThrows", "first"),
+        side=("RelSide", "median"), height=("RelHeight", "median"), n=("RelSide", "size")).reset_index()
+    rel = rel[rel["n"] >= 5]
+    for idx in df.index[wrong]:
+        r = df.loc[idx]
+        cand = rel[(rel["GameID"] == r["GameID"]) & (rel["PitcherId"] != r["PitcherId"])]
+        if cand.empty or pd.isna(r["RelSide"]) or pd.isna(r["RelHeight"]):
+            continue
+        dist = np.hypot(cand["side"] - r["RelSide"], cand["height"] - r["RelHeight"])
+        if dist.min() <= WRONG_PITCHER_MAX_FT:
+            who = cand.loc[dist.idxmin(), "name"]
+            df.at[idx, "issues"] = list(df.at[idx, "issues"]) + [f"likely thrown by {who} (release matches his in this game)"]
+    return df
+
+
 def load_decisions(path: str | Path) -> dict:
     """PitchUID -> 'keep' | 'drop' from a saved decisions CSV or a filled-in review workbook."""
     path = Path(path)

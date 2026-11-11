@@ -60,7 +60,7 @@ export function OverviewTab({ r }: { r: PitcherReport }) {
               </table>
             )}
             <div style={{ marginTop: 18 }}>
-              <div className="pr-block"><span className="pr-label">How his pitches work together</span><span className="body">{d.pitches_together.join("; ")}.</span></div>
+              {d.pitches_together.length > 0 && <div className="pr-block"><span className="pr-label">How his pitches work together</span><span className="body">{d.pitches_together.join("; ")}.</span></div>}
               {r.arsenal_plan && <div className="pr-block"><span className="pr-label">Arsenal plan</span><span className="body">{r.arsenal_plan}</span></div>}
             </div>
           </div>
