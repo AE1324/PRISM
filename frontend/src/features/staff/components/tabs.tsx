@@ -154,7 +154,7 @@ export function PitchTab({ r, p }: { r: PitcherReport; p: Pitch }) {
                   })}
                 </tbody>
               </table>
-              <p className="pr-note" style={{ margin: "8px 0 0" }}>Strike and whiff compare to D3 pitchers; the rest to the Oberlin staff.</p>
+              <p className="pr-note" style={{ margin: "8px 0 0" }}>Strike and whiff compare to D3 pitchers; the rest to his own staff.</p>
             </div>
           )}
         </div>
