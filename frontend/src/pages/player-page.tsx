@@ -46,6 +46,10 @@ export default function PlayerPage() {
     setParams(p, { replace: true });
   };
   const fb = r.fastball_traits, d = r.development, fps = r.situations.first_pitch_strike;
+  // hardest fastball he threw (any fastball type), from the cleaned data
+  const fbTypes = new Set(r.pitch_by_pitch.filter((x) => x.bucket === "Fastball").map((x) => x.pitch));
+  const fbTops = r.movement_profile.filter((m) => fbTypes.has(m.pitch) && typeof m.max_velo === "number").map((m) => m.max_velo);
+  const topFb = fbTops.length ? Math.max(...fbTops) : null;
   const cols = Math.min(Math.max(r.pitch_by_pitch.length, 1), 5);
 
   return (
@@ -75,8 +79,9 @@ export default function PlayerPage() {
 
           <div className="pr-kpis">
             <div>
-              <div className="pr-label">Fastball velo</div><div className="v">{num(fb?.velo)}</div>
-              <div className="s">mph · {ordinal(fb?.velo_pct_d3)} pct D3</div>
+              <div className="pr-label">Fastball velo</div>
+              <div className="v">{num(fb?.velo)}{topFb !== null && <span className="pr-top">top {num(topFb)}</span>}</div>
+              <div className="s">mph avg · {ordinal(fb?.velo_pct_d3)} pct D3</div>
               {typeof fb?.velo_pct_d3 === "number" && <PctBar pos={fb.velo_pct_d3 / 100} color={pctColor(fb.velo_pct_d3)} />}
             </div>
             <div>

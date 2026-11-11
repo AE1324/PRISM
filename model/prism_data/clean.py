@@ -45,6 +45,8 @@ RELEASE_OUTLIER_FT = 1.0
 MOVEMENT_READ_GAP_IN = 10.0
 SHAPE_Z = 4.0
 SHAPE_FLOOR = {"RelSpeed": 1.5, "InducedVertBreak": 3.0, "hb_arm": 3.0}
+VELO_OFF_MPH = 4.0       # a pitch this far off his usual speed for that pitch type...
+VELO_GAP_MPH = 2.0       # ...and this far from every other one he threw is a misread, not a good/bad day
 
 
 def _add(flags: pd.Series, mask: pd.Series, text) -> None:
@@ -115,7 +117,9 @@ def flag_shapes(df: pd.DataFrame, by: str = "PitcherId") -> pd.DataFrame:
     Checks that need ``shape_family`` (PRISM's pitch type), in this order:
       1. One-off pitch types: moved to the pitcher's closest regular pitch type
          when they look like it, otherwise flagged as a misread.
-      2. Pitches nothing like his others of the same type.
+      2. Pitches nothing like his others of the same type, and pitches whose speed sits alone far from
+         every other one of that type (velocity barely varies within a pitch type, so the shape check's
+         spread is too loose for it).
       3. Rapsodo's two movement reads disagreeing far more than usual for that pitch type.
     """
     df = df.copy()
@@ -163,6 +167,15 @@ def flag_shapes(df: pd.DataFrame, by: str = "PitcherId") -> pd.DataFrame:
             unit = "mph" if col == "RelSpeed" else "in"
             flags.at[i] = flags.at[i] + [f"unlike his other {kind.lower()}s ({label[col]} {df.at[i, col]:.1f} vs usual "
                                          f"{center[col]:.1f} {unit})"]
+        v = g["RelSpeed"]
+        off = (v - v.median()).abs()
+        for i in off[off > max(VELO_OFF_MPH, SHAPE_Z * _mad(v))].index:
+            if worst[i] > SHAPE_Z:
+                continue  # already flagged above
+            nearest = float((v.drop(index=i) - v[i]).abs().min())
+            if nearest >= VELO_GAP_MPH:
+                flags.at[i] = flags.at[i] + [f"velocity far off his other {kind.lower()}s ({v[i]:.1f} vs usual "
+                                             f"{v.median():.1f} mph; next closest {nearest:.1f} mph away)"]
 
     # 3. Rapsodo's two movement reads disagree far more than usual for this pitcher and pitch type
     # (the normal gap differs a lot by pitch type, e.g. gyro sliders).

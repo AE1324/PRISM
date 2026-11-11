@@ -78,6 +78,7 @@ const RATES: [keyof NonNullable<Pitch["rates"]>, string][] = [
 
 export function PitchTab({ r, p }: { r: PitcherReport; p: Pitch }) {
   const sh = p.shape, sa = p.spin_axis, g = p.grades;
+  const top = r.movement_profile.find((m) => m.pitch === p.pitch)?.max_velo;
   const graded = typeof g.pitch_plus === "number";
   const pc = { ["--pc" as string]: pitchColor(p.pitch) };
   return (
@@ -85,10 +86,10 @@ export function PitchTab({ r, p }: { r: PitcherReport; p: Pitch }) {
       <div className="pr-grid pr-detail">
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
-            {sh && <div className="mono soft" style={{ fontSize: 12 }}>{num(sh.velo)} mph · {num(sh.ivb)}" IVB · {num(sh.hb_arm)}" HB · {sh.spin} rpm · {p.n} thrown · {p.game_pitches} vs hitters</div>}
+            {sh && <div className="mono soft" style={{ fontSize: 12 }}>{num(sh.velo)} mph{typeof top === "number" ? ` (top ${num(top)})` : ""} · {num(sh.ivb)}" IVB · {num(sh.hb_arm)}" HB · {sh.spin} rpm · {p.n} thrown · {p.game_pitches} vs hitters</div>}
             <table style={{ width: "auto" }}>
-              <thead><tr><th className="c">Pitch+</th><th className="c">Stuff</th><th className="c">Loc</th><th className="c">Res</th></tr></thead>
-              <tbody><tr><GradeCell v={g.pitch_plus} /><GradeCell v={g.stuff_plus} /><GradeCell v={g.location_plus} /><GradeCell v={g.results_plus} /></tr></tbody>
+              <thead><tr><th className="c">Pitch+</th><th className="c">Stuff</th><th className="c">Shape</th><th className="c">Loc</th><th className="c">Res</th></tr></thead>
+              <tbody><tr><GradeCell v={g.pitch_plus} /><GradeCell v={g.stuff_plus} /><GradeCell v={g.shape_plus} /><GradeCell v={g.location_plus} /><GradeCell v={g.results_plus} /></tr></tbody>
             </table>
           </div>
 

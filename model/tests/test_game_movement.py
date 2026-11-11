@@ -74,3 +74,17 @@ def test_pitches_without_movement_typed_from_speed_and_spin():
     assert out["subtype"].iloc[1] == "Sweeper" and "speed and spin" in out["notes"].iloc[0][0]
     assert pd.isna(out["shape_family"].iloc[2])  # too far from anything he throws
     assert set(TYPE_SCALE) == {"RelSpeed", "SpinRate"}
+
+
+def test_lone_velocity_misread_is_flagged_but_a_hard_day_is_not():
+    from prism_data.clean import flag_shapes
+    speeds = [79.0, 79.5, 80.0, 79.2, 80.4, 79.8, 81.0, 78.6, 85.2]          # one lone 85.2
+    hard = [79.0, 79.5, 80.0, 79.2, 80.4, 79.8, 83.6, 84.1, 84.4, 84.0]     # a whole hard day, not alone
+    for v, expect in ((speeds, 1), (hard, 0)):
+        df = pd.DataFrame({"PitcherId": "P", "RelSpeed": v, "InducedVertBreak": 20.0, "hb_arm": 12.0,
+                           "shape_family": "Four-seam"})
+        df["issues"] = [[] for _ in range(len(df))]
+        df["notes"] = [[] for _ in range(len(df))]
+        out = flag_shapes(df)
+        hits = out["issues"].map(lambda f: any("velocity far off" in x for x in f))
+        assert hits.sum() == expect

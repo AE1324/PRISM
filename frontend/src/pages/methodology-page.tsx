@@ -144,8 +144,18 @@ export default function MethodologyPage() {
               narrower and just as important: knowing what normal looks like at this level.
             </p>
             <p className="m-0">
-              Before grading, sessions are cleaned automatically. Misreads, pitches tagged to the wrong pitcher and
-              impossible values are flagged for review instead of silently dropped.
+              Every session is tagged with its device and setting: game, live or bullpen. Only game and live sessions are
+              graded; bullpens are kept but never counted. The tag alone decides, never a guess from velocity.
+            </p>
+            <p className="m-0">
+              Before grading, sessions are cleaned automatically, and every flag goes to a review sheet instead of being
+              silently dropped. PRISM flags impossible values, pitches released from the wrong side or far from the
+              pitcher's usual release point (naming the likely pitcher when it matches someone else in the same game),
+              pitches unlike his others of the same type, and a pitch whose speed sits alone, 4+ mph off his usual for
+              that pitch and 2+ mph from every other one he threw. For TrackMan, each game's movement is also checked as a
+              whole. Calibration is set per game, so a bad day shifts every pitcher the same way. If most pitches have no
+              reliable movement, or every pitcher's fastball reads 3+ inches off his other games, that game's movement is
+              set aside. Its pitches still count for velocity, location and results.
             </p>
           </Section>
 
