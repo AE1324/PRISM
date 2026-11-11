@@ -61,6 +61,7 @@ export interface Pitch {
   usage_pct: number;
   grades: Grades;
   results_weight?: number;
+  results_tier?: "measured" | "charted" | "outcome";
   shape?: { velo: number; ivb: number; hb_arm: number; spin: number; velo_diff?: number | null };
   stuff_parts?: Record<string, number>;
   comparable_mlb?: { text?: string } | null;

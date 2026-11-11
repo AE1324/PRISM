@@ -1,6 +1,6 @@
 import type { Pitch, PitcherReport } from "../types";
 import { num, ordinal, pct, pitchColor, signed } from "../format";
-import { GradeCell, MovementChart, Section, Status, Swatch, TargetTable, TrendChart } from "./ui";
+import { GradeCell, MovementChart, Section, Status, Swatch, TargetTable, TierTag, TIER_TEXT, TrendChart } from "./ui";
 
 const List = ({ items, ordered, empty }: { items: string[]; ordered?: boolean; empty: string }) =>
   !items.length ? <p className="soft" style={{ margin: 0 }}>{empty}</p> : ordered ? <ol>{items.map((x) => <li key={x}>{x}</li>)}</ol> : <ul>{items.map((x) => <li key={x}>{x}</li>)}</ul>;
@@ -38,7 +38,14 @@ export function OverviewTab({ r }: { r: PitcherReport }) {
             </tbody>
           </table>
         </div>
-        <p className="pr-note" style={{ margin: "10px 0 0" }}>Results and location count more as the sample grows. Pitch types need 10 pitches to be graded.</p>
+      
+        <p className="pr-note" style={{ margin: "10px 0 0" }}>
+          {(() => {
+            const t = [...new Set(r.pitch_by_pitch.map((p) => p.results_tier).filter(Boolean))] as string[];
+            return t.length ? `Results from ${t.map((x) => TIER_TEXT[x]?.long.split(":")[0]).join(" and ")}. ` : "";
+          })()}
+          Results and location count more as the sample grows{r.pitch_by_pitch.some((p) => p.results_tier === "outcome") ? "; results count less without contact data" : ""}. Pitch types need 10 pitches to be graded.
+        </p>
       </Section>
 
       <Section idx="03" title="Shapes and fastball">
@@ -86,11 +93,14 @@ export function PitchTab({ r, p }: { r: PitcherReport; p: Pitch }) {
       <div className="pr-grid pr-detail">
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
-            {sh && <div className="mono soft" style={{ fontSize: 12 }}>{num(sh.velo)} mph{typeof top === "number" ? ` (top ${num(top)})` : ""} · {num(sh.ivb)}" IVB · {num(sh.hb_arm)}" HB · {sh.spin} rpm · {p.n} thrown · {p.game_pitches} vs hitters</div>}
-            <table style={{ width: "auto" }}>
-              <thead><tr><th className="c">Pitch+</th><th className="c">Stuff</th><th className="c">Shape</th><th className="c">Loc</th><th className="c">Res</th></tr></thead>
-              <tbody><tr><GradeCell v={g.pitch_plus} /><GradeCell v={g.stuff_plus} /><GradeCell v={g.shape_plus} /><GradeCell v={g.location_plus} /><GradeCell v={g.results_plus} /></tr></tbody>
-            </table>
+            {sh && <div className="mono soft" style={{ fontSize: 12 }}>{num(sh.velo)} mph{typeof top === "number" ? ` (top ${num(top)})` : ""} · {num(sh.ivb)}" IVB · {num(sh.hb_arm)}" HB · {sh.spin} rpm · {Math.max(p.n, p.game_pitches)} thrown · {p.game_pitches} vs hitters{p.n < p.game_pitches ? ` · ${p.n} with movement` : ""}</div>}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+              <table style={{ width: "auto" }}>
+                <thead><tr><th className="c">Pitch+</th><th className="c">Stuff</th><th className="c">Shape</th><th className="c">Loc</th><th className="c">Res</th></tr></thead>
+                <tbody><tr><GradeCell v={g.pitch_plus} /><GradeCell v={g.stuff_plus} /><GradeCell v={g.shape_plus} /><GradeCell v={g.location_plus} /><GradeCell v={g.results_plus} /></tr></tbody>
+              </table>
+              {graded && <TierTag tier={p.results_tier} weight={p.results_weight} />}
+            </div>
           </div>
 
           {!graded ? (

@@ -207,3 +207,19 @@ export function TrendChart({ title, series, outings, unit }: { title: string; se
     </div>
   );
 }
+
+export const TIER_TEXT: Record<string, { short: string; long: string }> = {
+  measured: { short: "Measured", long: "measured contact: exit velocity and launch angle, judged against this level's batted balls" },
+  charted: { short: "Charted", long: "charted contact: batted-ball type and weak/average/hard, as entered" },
+  outcome: { short: "Outcomes only", long: "outcomes only: no contact data, so results count the least" },
+};
+
+/** How much is known about this pitch's balls in play, and how much its results count toward Pitch+. */
+export function TierTag({ tier, weight }: { tier?: string; weight?: number }) {
+  if (!tier || !TIER_TEXT[tier]) return null;
+  return (
+    <span className={`pr-tier ${tier}`} title={`Results+ from ${TIER_TEXT[tier].long}.`}>
+      Results: {TIER_TEXT[tier].short}{typeof weight === "number" ? ` · ${weight}% of Pitch+` : ""}
+    </span>
+  );
+}

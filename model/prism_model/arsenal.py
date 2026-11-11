@@ -42,7 +42,7 @@ import pandas as pd
 
 from prism_data import sessions
 from prism_data.paths import DATA_DIR
-from prism_model import d3, fastball_traits, references
+from prism_model import d3, fastball_traits, references, results_tiers
 from prism_model.references import RATE_COLUMNS, add_flags, num, location_score, result_values, results_score
 from prism_model.shapes import BUCKET
 from prism_model.stuff import GROUPS, aggregate, predict, to_plus
@@ -53,11 +53,10 @@ MIN_TYPE_PITCHES = 10       # a pitch type needs this many to be graded
 MIN_LOCATED = 10            # located pitches needed for a Location grade
 MIN_SESSION_PITCHES = 5     # per outing, for Progress
 MIN_PEERS = 4               # pitch types needed to set a 100 scale
-# Pitch+ trusts Results n / (n + RESULTS_K). Garnet used 15, but results are mostly noise at fall sample sizes:
-# on Oberlin's data the spread in Results across pitch types (3.5 RV/100) is all binomial-style noise (3.6), and on
-# MLB pitcher-season rows a pitch type's results are half signal at ~770 game pitches. So Results only take over
-# once there's a real sample (6% at 50 game pitches, ~25% over a full season of ~250).
-RESULTS_K = 770
+# Pitch+ trusts Results n / (n + k). Garnet used 15, but results are mostly noise at fall sample sizes. k now
+# depends on how much is known about the balls in play (results_tiers: measured 400, charted 440, outcome-only
+# 1000 game pitches, measured on MLB). RESULTS_K is the fallback when a pitch type has no balls in play yet.
+RESULTS_K = results_tiers.TIER_K["outcome"]
 # Location is mostly noise at fall sample sizes: on Oberlin's data the spread in pitch-type location is 8.6 pts,
 # 8.2 of which is binomial noise (true spread ~2.5, same as MLB). So location is regressed in two steps:
 # pitcher command toward the staff (counts half at LOC_K_PITCHER located pitches, from the Oberlin talent spread
@@ -194,7 +193,18 @@ def prepare(df: pd.DataFrame, ref: dict) -> pd.DataFrame:
             df[col] = np.nan
     for col in ("Balls", "Strikes"):  # counts stored as floats would read "0.0-0.0"
         df[col] = pd.to_numeric(df[col], errors="coerce").round().astype("Int64")
-    df["result_rv"] = result_values(df, ref["results"])
+    tiers = results_tiers.load()
+    if tiers is not None:
+        ev = num(df["ExitSpeed"])
+        if "ExitSpeed_mlb" not in df and ev.notna().any():
+            # no level reference from the build: place exit velocities within this file's own batted balls
+            bip = df["PitchCall"].astype(object) == "InPlay"
+            df["ExitSpeed_mlb"] = results_tiers.level_ev_to_mlb(ev, ev[bip], tiers)
+        df = results_tiers.classify_contact(df, tiers)
+        df["result_rv"] = results_tiers.tiered_values(df, ref["results"], tiers)
+    else:
+        df["result_rv"] = result_values(df, ref["results"])
+        df["result_tier"] = None
     df = add_flags(df, ref.get("hard_hit_mph", references.HARD_HIT_MPH))
     df["outing"] = df["Date"].astype("string").fillna("unknown")
     order = num(df["PitchNo"]) if df["PitchNo"].notna().any() else pd.Series(np.arange(len(df)), index=df.index)
@@ -280,6 +290,21 @@ def regress_location(rows: pd.DataFrame, ref: dict, d3ref: dict | None = None,
     return rows
 
 
+def add_results_tier(rows: pd.DataFrame, df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
+    """
+    Each pitch type's Results tier and weight constant from its balls in play (results_tiers.tier_mix).
+    A pitch type with no balls in play yet takes the pitcher's overall mix, else outcome-only.
+    """
+    if "result_tier" not in df or df["result_tier"].isna().all():
+        return rows.assign(results_k=float(RESULTS_K), results_tier=None)
+    mix = results_tiers.tier_mix(df, by)
+    rows = rows.merge(mix[by + ["results_k", "results_tier"]], on=by, how="left")
+    pitcher = results_tiers.tier_mix(df, [by[0]]).set_index(by[0])
+    rows["results_k"] = rows["results_k"].fillna(rows[by[0]].map(pitcher["results_k"])).fillna(float(RESULTS_K))
+    rows["results_tier"] = rows["results_tier"].fillna(rows[by[0]].map(pitcher["results_tier"])).fillna("outcome")
+    return rows
+
+
 def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d3",
                d3ref: dict | None = None) -> pd.DataFrame:
     """One row per pitcher pitch type with Stuff, Shape, Location, Results and Pitch+."""
@@ -290,6 +315,7 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
     rows = rows.merge(location_score(df, by), on=by, how="left").merge(results_score(df, by), on=by, how="left")
     rows["n_located"] = rows["n_located"].fillna(0).astype(int)
     rows["n_game"] = rows["n_game"].fillna(0).astype(int)
+    rows = add_results_tier(rows, df, by)
     strikes = None
     if "strike" in df:
         g = df[df["strike"].notna()]
@@ -324,8 +350,9 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
             rows[comp], rows[f"{comp}_basis"], rows[f"{comp}_mean"], rows[f"{comp}_sd"] = r["plus"], r["basis"], r["mean"], r["sd"]
 
     rows["pitch_plus"] = [
-        pitch_plus(s, l, r, g) if n >= MIN_TYPE_PITCHES else None
-        for s, l, r, g, n in zip(rows["stuff"], rows["location"], rows["results"], rows["n_game"], rows["n"])
+        pitch_plus(s, l, r, g, k) if n >= MIN_TYPE_PITCHES else None
+        for s, l, r, g, n, k in zip(rows["stuff"], rows["location"], rows["results"], rows["n_game"], rows["n"],
+                                    rows["results_k"])
     ]
     rows["pitch_plus"] = rows["pitch_plus"].astype(float)
 
@@ -1200,7 +1227,9 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
                 pitches.append(entry)
                 continue
             parts = expl.get(idx, {})
-            entry["results_weight"] = round(100 * r["n_game"] / (r["n_game"] + RESULTS_K))
+            entry["results_weight"] = round(100 * r["n_game"] / (r["n_game"] + r["results_k"]))
+            if r.get("results_tier"):
+                entry["results_tier"] = r["results_tier"]
             entry["shape"] = {"velo": _num(r["velo"]), "ivb": _num(r["ivb"]), "hb_arm": _num(r["hb"]),
                               "spin": _num(r["spin"], 0), "velo_diff": _num(r.get("velo_diff")),
                               "rel_height": _num(r.get("rel_height"), 2)}

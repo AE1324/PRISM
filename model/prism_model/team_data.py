@@ -104,6 +104,21 @@ def type_without_movement(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_level_exit_velo(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ``ExitSpeed_mlb``: each exit velocity mapped onto MLB's by its percentile among every measured ball in
+    play in these files (both teams), so "hard contact" means hard for this level. Needs 50+ batted balls.
+    """
+    from prism_model import results_tiers
+
+    tiers = results_tiers.load()
+    if tiers is None or "ExitSpeed" not in df:
+        return df
+    ev = pd.to_numeric(df["ExitSpeed"], errors="coerce")
+    bip = (df["PitchCall"].astype(object) == "InPlay") & ev.notna() & pd.to_numeric(df["Angle"], errors="coerce").notna()
+    return df.assign(ExitSpeed_mlb=results_tiers.level_ev_to_mlb(ev, ev[bip], tiers))
+
+
 def add_batter_side(df: pd.DataFrame, path: Path) -> pd.DataFrame:
     if not path.exists():
         return df
@@ -174,6 +189,7 @@ def build_trackman(folder: Path, decisions_path: Path | None = None, team: str |
     df = attribute_wrong_pitcher(df)
     games = check_game_movement(df)
     df = apply_game_movement(df, games, decisions)
+    df = add_level_exit_velo(df)  # both teams' batted balls set the level
     if team:  # after the game check, which reads both teams' pitchers
         df = df[df["PitcherTeam"].astype(str) == team].reset_index(drop=True)
     df = classify_clean(df)

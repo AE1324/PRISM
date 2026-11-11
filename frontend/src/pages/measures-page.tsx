@@ -49,7 +49,7 @@ const GRADES = [
   { name: "Stuff+", q: "How good is the pitch itself?", body: "Velocity, movement, spin and release, graded on how many runs pitches built like this one give up. Nothing about where it was thrown or what happened.", from: "Pitch tracking only" },
   { name: "Shape+", q: "How good is the design, ignoring speed?", body: "Stuff+ with velocity taken out. It separates a well-shaped pitch from one that's carried by arm speed, and shows what a pitch could become as velocity comes.", from: "Pitch tracking only" },
   { name: "Location+", q: "Does he put it where it needs to go?", body: "How often the pitch lands in the competitive zone (the edges and the zone) while staying out of the middle. It's weighed by how much data is behind it.", from: "Plate location" },
-  { name: "Results+", q: "What has it actually done in games?", body: "The run value of every pitch thrown against hitters: balls, strikes, whiffs and how hard the ball was hit when it was put in play.", from: "Live at-bats" },
+  { name: "Results+", q: "What has it actually done in games?", body: "The run value of every pitch thrown against hitters: balls, strikes, whiffs, and the type and quality of contact when the ball was put in play, judged against that level.", from: "Live at-bats" },
 ];
 
 /* ---------- jobs ---------- */
@@ -80,7 +80,7 @@ const DETAILS: Record<string, { desc: string; inputs: string }> = {
 
 export default function MeasuresPage() {
   const example = { stuff: 121, loc: 95, res: 122, n: 27 };
-  const resW = example.n / (example.n + 770);
+  const resW = example.n / (example.n + 400); // measured contact (TrackMan)
   const pp = Math.round((example.stuff + example.loc) / 2 + resW * (example.res - (example.stuff + example.loc) / 2));
 
   return (
@@ -158,12 +158,14 @@ export default function MeasuresPage() {
                 <p className="m-0 text-[15px] text-[#EDF0F4]">The one-number summary.</p>
               </div>
               <code className={`rounded-lg px-3 py-2 text-[13px] text-[#C2C8D1] ${MONO}`} style={{ background: SITE.bg }}>
-                Pitch+ = avg(Stuff+, Location+) → Results+ by n ÷ (n + 770)
+                Pitch+ = avg(Stuff+, Location+) → Results+ by n ÷ (n + k)
               </code>
             </div>
             <p className="m-0 mt-3 text-sm leading-relaxed text-[#B3BAC5]">
-              With 50 game pitches, results are 6% of the grade; over a full season of about 250, closer to 25%. Early on,
-              a pitch is judged mostly on what it is, not on a handful of outcomes.
+              With 50 game pitches, results are about 11% of the grade with TrackMan contact data and 5% with outcomes only;
+              over a full season of about 250, 38% and 20%. Early on, a pitch is judged mostly on what it is, not on a
+              handful of outcomes. Every Results+ is tagged measured, charted or outcomes only, so you know how much is
+              behind it.
             </p>
           </div>
         </Block>

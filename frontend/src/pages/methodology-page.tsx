@@ -283,16 +283,37 @@ export default function MethodologyPage() {
           </Section>
 
           <Section id="results" title="Results+"
-            short="Results+ is what actually happened against hitters, valued in runs."
+            short="Results+ is what actually happened against hitters, valued in runs, with a tag for how much is known about the contact."
             specs={[
               ["Non-contact pitches", "run value by count and outcome, from MLB"],
-              ["Balls in play", "run value by count, exit velocity (5 mph bins) and launch angle (10° bins); play result if not tracked"],
+              ["Balls in play", "12 categories: ground ball, line drive, fly ball or popup × weak, average or hard contact, each worth its MLB average run value by count"],
+              ["Measured", "TrackMan: type from launch angle (Statcast bands: under 10°, 10–25°, 25–50°, 50°+); contact from exit velocity ranked among that level's batted balls"],
+              ["Charted", "batted-ball type and weak/average/hard as entered by whoever charts"],
+              ["Outcomes only", "the play result (single, out…) valued by its MLB average"],
               ["Scale", "runs per 100 game pitches, flipped and scaled so 100 = average and 10 = 1 SD"],
             ]}>
             <p className="m-0">
-              Every pitch thrown to a live hitter is worth something: a 2-0 ball costs more than an 0-2 ball, and a 100 mph
-              line drive costs more than a weak ground ball. Results+ adds those up. It's the most honest grade over a full
-              season and the least reliable over a few outings, which is why Pitch+ trusts it gradually.
+              Every pitch thrown to a live hitter is worth something: a 2-0 ball costs more than an 0-2 ball, and a hard line
+              drive costs more than a weak ground ball. Results+ adds those up. It's the most honest grade over a full season
+              and the least reliable over a few outings, which is why Pitch+ trusts it gradually.
+            </p>
+            <p className="m-0">
+              How much is known about a ball in play depends on how it was recorded, so every Results+ carries a tag.
+              Measured means TrackMan exit velocity and launch angle. Charted means someone recorded the batted-ball type and
+              whether it was hit weak, average or hard. Outcomes only means just the result. All three use the same 12
+              categories; what changes is how a ball gets placed in one.
+            </p>
+            <p className="m-0">
+              Hard contact means hard for that level. Exit velocities run about 14 mph lower in summer college ball than in
+              MLB at the median, so a measured exit velocity is ranked among every batted ball in that level's games, both
+              teams, and judged by that rank. A charter's "hard" is already relative to what they're watching, so charted
+              calls are taken as entered.
+            </p>
+            <p className="m-0">
+              Even measured balls are valued by category rather than by exact exit velocity and launch angle. On MLB pitcher
+              seasons, the 12 categories predicted a pitcher's runs on the rest of his pitches better than exact 5 mph × 10°
+              cells, and coarser beat finer every time. For a pitcher, the exact numbers mostly add luck: a 101 mph liner at
+              the shortstop and one that finds the gap count very differently.
             </p>
           </Section>
 
@@ -300,16 +321,22 @@ export default function MethodologyPage() {
             short="Pitch+ blends what a pitch is with what it has done, and lets the results take over only once there are enough of them to mean something."
             specs={[
               ["Projection", "mean of Stuff+ and Location+"],
-              ["Results weight", "n ÷ (n + 770), where n is game pitches"],
-              ["Why 770", "on MLB pitcher seasons, a pitch type's results are half signal at about 770 game pitches"],
+              ["Results weight", "n ÷ (n + k), where n is game pitches and k depends on how the balls in play were recorded"],
+              ["k", "measured 400 · charted 440 · outcomes only 1,000"],
+              ["How k was measured", "the game pitches at which a pitch type's results predict runs on the rest of his pitches as much as chance moves them (MLB 2024–25 pitcher seasons, split in random halves; charted with 1 in 5 calls one category off)"],
             ]}>
-            <Formula>Pitch+ = projection + n ÷ (n + 770) × (Results+ − projection)</Formula>
-            <MiniTable head={["Game pitches", "Results weight", "What it means"]} rows={[
-              [17, "2%", "a few outings: graded on what the pitch is"],
-              [50, "6%", "a strong fall"],
-              [250, "25%", "about a full season"],
-              [770, "50%", "results and traits count equally"],
+            <Formula>Pitch+ = projection + n ÷ (n + k) × (Results+ − projection)</Formula>
+            <MiniTable head={["Game pitches", "Measured", "Outcomes only", "What it means"]} rows={[
+              [17, "4%", "2%", "a few outings: graded on what the pitch is"],
+              [50, "11%", "5%", "a strong fall"],
+              [250, "38%", "20%", "about a full season"],
+              [1000, "71%", "50%", "results lead"],
             ]} />
+            <p className="m-0">
+              Charted contact sits just under measured, at 440. One in five charted calls being a category off (the rate
+              TrackMan operators' hand-tagged hit types disagreed with launch angle) costs surprisingly little. Outcomes alone
+              carry far more luck, so they need more than twice the sample to mean the same thing.
+            </p>
             <p className="m-0">
               On Oberlin's data, the whole spread in Results from one pitch to another was what chance would produce, so
               trusting results early would mostly reward luck.

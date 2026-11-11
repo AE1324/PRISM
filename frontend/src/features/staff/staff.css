@@ -167,3 +167,7 @@
 }
 
 .pr .pr-top { font-size: 12.5px; font-weight: 500; color: var(--pr-soft); margin-left: 8px; letter-spacing: 0; font-family: var(--pr-mono, ui-monospace, monospace); }
+.pr .pr-tier { font-family: var(--pr-mono); font-size: 11px; letter-spacing: .02em; padding: 3px 9px; border-radius: 999px; color: var(--pr-soft); border: 1px solid rgba(241,243,246,0.16); white-space: nowrap; }
+.pr .pr-tier.measured { color: var(--pr-ink); border-color: rgba(241,243,246,0.42); }
+.pr .pr-tier.charted { border-style: dashed; border-color: rgba(241,243,246,0.32); }
+.pr .pr-tier.outcome { border-color: rgba(241,243,246,0.12); }

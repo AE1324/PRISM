@@ -86,7 +86,9 @@ def add_flags(df: pd.DataFrame, hard_hit_mph: float = HARD_HIT_MPH) -> pd.DataFr
 
     swing = call.isin(SWING_CALLS)
     in_play = call == "InPlay"
-    ev, la = num(df["ExitSpeed"]), num(df["Angle"])
+    # hard contact is judged on the MLB-equivalent exit velocity when the level was translated
+    ev = num(df["ExitSpeed_mlb"]) if "ExitSpeed_mlb" in df else num(df["ExitSpeed"])
+    la = num(df["Angle"])
     df["strike"] = call.isin(STRIKE_CALLS).where(game)
     df["called_strike"] = (call == "StrikeCalled").where(game)
     df["zone"] = df["in_zone"].where(game)
