@@ -9,7 +9,8 @@ Steps
   5. Apply saved review decisions (keep/drop by pitch id).
   6. Match AWRE results to Rapsodo pitches and attach count and result.
   7. Add hitter handedness from a roster file, when there is one.
-  8. Save the data and a review workbook.
+  8. Tag each session's device and setting (game | live | bullpen) from the sessions file.
+  9. Save the data and a review workbook.
 
 Files (all inside the gitignored data/ folder)
   data/rapsodo/*.csv                         Rapsodo player exports
@@ -17,6 +18,7 @@ Files (all inside the gitignored data/ folder)
   data/rapsodo/review_decisions.csv          saved keep/drop calls (or a filled-in review workbook)
   data/rosters/roster.csv                    optional: Name, Bats (R/L/S), Throws, Position, Height
   data/rosters/inactive_pitchers.txt         optional: one name per line, left out entirely
+  data/sessions/sessions.csv                 Date, Device, Setting[, Pitcher]: untagged Rapsodo = bullpen
   -> data/processed/<name>.parquet           all pitches, with issues, exclude flag and results
   -> data/review/<name>_review.xlsx          the review workbook
 
@@ -36,6 +38,7 @@ from prism_data import awre as awre_io
 from prism_data import rapsodo
 from prism_data.clean import (apply_decisions, apply_game_movement, attribute_wrong_pitcher, check_game_movement,
                               flag_basic, flag_shapes, load_decisions)
+from prism_data.sessions import load_sessions, tag_sessions
 from prism_data.trackman import read_trackman
 from prism_data.match import match, merge
 from prism_data.paths import DATA_DIR, PROCESSED_DIR
@@ -122,7 +125,8 @@ def inactive(path: Path) -> set[str]:
 
 
 def build(name: str, rapsodo_dir: Path, awre_dir: Path | None, decisions_path: Path | None,
-          hitters_path: Path, inactive_path: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
+          hitters_path: Path, inactive_path: Path | None = None,
+          sessions_path: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
     gone = inactive(inactive_path) if inactive_path else set()
     rap = rapsodo.read_folder(rapsodo_dir)
     rap = rap[~rap["PitcherId"].isin(gone)].reset_index(drop=True)
@@ -138,11 +142,12 @@ def build(name: str, rapsodo_dir: Path, awre_dir: Path | None, decisions_path: P
         pairs = match(awre, rap)
         rap = merge(awre, rap, pairs)
     rap = add_batter_side(rap, hitters_path)
+    rap = tag_sessions(rap, load_sessions(sessions_path))
     return rap, awre, pairs
 
 
 def build_trackman(folder: Path, decisions_path: Path | None = None, team: str | None = None,
-                   inactive_path: Path | None = None) -> pd.DataFrame:
+                   inactive_path: Path | None = None, sessions_path: Path | None = None) -> pd.DataFrame:
     """
     TrackMan game exports through the same cleaning as Rapsodo: read every .csv/.xlsx export, flag misreads
     per pitcher per game (release point checks use each game as its own stint), name the likely pitcher for
@@ -175,6 +180,7 @@ def build_trackman(folder: Path, decisions_path: Path | None = None, team: str |
     df = flag_shapes(df)
     df = type_without_movement(df)
     df = apply_decisions(df, decisions)
+    df = tag_sessions(df, load_sessions(sessions_path))  # TrackMan exports default to game
     df.attrs["games"] = games
     return df
 
@@ -224,6 +230,7 @@ def review_tables(df: pd.DataFrame, awre: pd.DataFrame | None, pairs: pd.DataFra
         flagged=("issues", lambda s: int((s.map(len) > 0).sum())),
         notes=("notes", lambda s: int((s.map(len) > 0).sum())),
         dropped=("exclude", "sum"),
+        game_or_live=("Setting", lambda s: int(s.isin(["game", "live"]).sum())),
         graded_pitches=("exclude", lambda s: int((~s).sum())),
     )
     if pairs is not None:
@@ -329,10 +336,11 @@ def main() -> None:
     parser.add_argument("--decisions", default=str(DATA_DIR / "rapsodo" / "review_decisions.csv"))
     parser.add_argument("--hitters", default=str(DATA_DIR / "rosters" / "roster.csv"))
     parser.add_argument("--inactive", default=str(DATA_DIR / "rosters" / "inactive_pitchers.txt"))
+    parser.add_argument("--sessions", default=str(DATA_DIR / "sessions" / "sessions.csv"))
     args = parser.parse_args()
 
     df, awre, pairs = build(args.name, Path(args.rapsodo), Path(args.awre), Path(args.decisions), Path(args.hitters),
-                             Path(args.inactive))
+                             Path(args.inactive), Path(args.sessions))
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     out = df.copy()
     out["issues"] = out["issues"].map(lambda f: "; ".join(f))
@@ -346,6 +354,9 @@ def main() -> None:
     noted = int((df["notes"].map(len) > 0).sum())
     print(f"{df['PitcherId'].nunique()} pitchers, {len(df):,} Rapsodo pitches; {flagged} likely misreads, "
           f"{noted} with notes; {int(df['exclude'].sum())} left out of grades")
+    print("Sessions by setting (pitches): " + ", ".join(f"{k} {v}" for k, v in df["Setting"].value_counts().items()))
+    if (df["Setting"] == "bullpen").all():
+        print(f"  No graded sessions: tag game/live dates in {args.sessions}")
     if pairs is not None:
         print(pairs["confidence"].value_counts().to_string())
     print(f"\nSaved {PROCESSED_DIR / (args.name + '.parquet')}\nReview workbook: {review}")

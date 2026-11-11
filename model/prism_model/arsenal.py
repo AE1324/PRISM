@@ -40,6 +40,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from prism_data import sessions
 from prism_data.paths import DATA_DIR
 from prism_model import d3, fastball_traits, references
 from prism_model.references import RATE_COLUMNS, add_flags, num, location_score, result_values, results_score
@@ -1152,7 +1153,7 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
     Reports for every pitcher in a classified PRISM-format frame (see ``build_reports`` for raw files).
     ``heights`` maps pitcher name to height in feet (used to judge whether extension is short for his size).
     """
-    df = prepare(df[df["shape_family"].notna()], ref)
+    df = prepare(sessions.graded(df)[lambda d: d["shape_family"].notna()], ref)  # bullpens are stored, not graded
     fb_model, fb_offset, d3_scale = _fb_setup(df)
     d3ref = d3.load() if scale == "d3" else None
     if scale == "d3" and d3ref is None:
