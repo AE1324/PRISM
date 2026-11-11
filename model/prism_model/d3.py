@@ -161,23 +161,55 @@ def mlb_equivalent(pct, ref: dict):
 
 def translate(rows: pd.DataFrame, ref: dict) -> pd.DataFrame:
     """
-    Move every pitch's perceived velocity by the gap between the pitcher's main
-    fastball and the MLB fastball at the same D3 percentile. Adds ``velo_shift``,
-    ``fb_pct_d3`` and keeps the original as ``perceived_velo_d3``.
+    Work out each pitcher's D3-to-MLB translation; the pitch features themselves are left as thrown.
+
+    His main fastball's perceived velocity -> its D3 percentile -> the MLB perceived velocity at that
+    percentile. ``velo_ratio`` = MLB-equivalent / his fastball, applied by ``model_inputs`` to every pitch
+    of his. Adds ``velo_ratio``, ``velo_shift`` (fastball mph added, for display) and ``fb_pct_d3``.
     """
     rows = rows.copy()
     rows["perceived_velo_d3"] = rows["perceived_velo"]
+    rows["velo_ratio"] = 1.0
     rows["velo_shift"] = 0.0
     rows["fb_pct_d3"] = np.nan
     fb = rows[rows["shape_family"].isin(FASTBALLS)].sort_values("n", ascending=False).drop_duplicates("PitcherId")
     for _, r in fb.iterrows():
+        if not (r["perceived_velo"] > 0):
+            continue
         pct = float(d3_percentile(r["perceived_velo"], ref))
-        shift = float(mlb_equivalent(pct, ref)) - r["perceived_velo"]
+        target = float(mlb_equivalent(pct, ref))
         mask = rows["PitcherId"] == r["PitcherId"]
-        rows.loc[mask, "velo_shift"] = shift
+        rows.loc[mask, "velo_ratio"] = target / r["perceived_velo"]
+        rows.loc[mask, "velo_shift"] = target - r["perceived_velo"]
         rows.loc[mask, "fb_pct_d3"] = pct
-    rows["perceived_velo"] = rows["perceived_velo"] + rows["velo_shift"]
     return rows
+
+
+# Features that scale with arm speed when a pitch is put on its MLB-equivalent footing.
+SCALED_WITH_VELO = ("perceived_velo", "spin", "velo_diff")
+
+
+def model_inputs(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    The Stuff model's view of a D3 pitch: the same pitch thrown at his MLB-equivalent arm speed.
+
+    Everything that scales with arm speed is multiplied by the pitcher's ``velo_ratio``:
+    - velocity (so his fastball sits at its D3 percentile on the MLB scale),
+    - spin rate (spin rises with arm speed for the same grip and release; spin per mph, the usual
+      velocity-free measure, is unchanged, and Oberlin's matches MLB's at about 24-25 rpm/mph on four-seams),
+    - velocity separation from his fastball (the same percentage off, which keeps the hitter's relative
+      timing gap the same).
+    Movement is left as thrown: with spin scaled with speed, Magnus force grows with speed squared while
+    flight time shrinks with it, so break stays about the same. Release point is unaffected by speed.
+    """
+    if "velo_ratio" not in df:
+        return df
+    out = df.copy()
+    k = pd.to_numeric(out["velo_ratio"], errors="coerce").fillna(1.0)
+    for c in SCALED_WITH_VELO:
+        if c in out:
+            out[c] = out[c] * k
+    return out
 
 
 def d3_rate(kind: str, col: str, ref: dict) -> float:

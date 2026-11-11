@@ -220,14 +220,25 @@ export default function MethodologyPage() {
             specs={[
               ["Velocity scale", "pitcher-level D3 fastball percentiles from 100 Synergy teams, shrunk toward team-strength predictions and reweighted to match D3's strength spread"],
               ["D3 percentiles", "10th 78.1 · 25th 80.1 · 50th 82.3 · 75th 84.5 · 90th 86.5 · 99th 89.8 mph"],
-              ["Translation", "his fastball's D3 percentile → the MLB speed at that percentile; every pitch shifts by the same amount"],
+              ["Translation", "his fastball's D3 percentile → the MLB speed at that percentile; the ratio between the two is his arm-speed factor"],
+              ["Scaled by that factor", "velocity of every pitch, spin rate (spin per mph unchanged), separation off the fastball (same % off)"],
+              ["Left as thrown", "movement (with spin scaled to speed, break stays about the same), release point, extension"],
               ["Velocity weight", "2.0× on fastball velocity: whiffs climb faster with velocity in D3 than in MLB (capped at 2)"],
               ["Rate references", "strike% and whiff% by pitch type from Synergy D3, reweighted by team strength"],
             ]}>
             <p className="m-0">
               Feeding a D3 pitcher's raw velocity into an MLB model would grade almost every fastball as poor. Instead, PRISM
               asks where his fastball ranks among Division III pitchers, finds the MLB velocity at that same rank, and grades
-              his whole arsenal as if it were thrown at that speed. Shapes and separation stay exactly as he throws them.
+              his whole arsenal as if he threw it with that arm speed.
+            </p>
+            <p className="m-0">
+              Arm speed doesn't only change velocity. For the same grip and release, a pitch thrown harder also spins
+              harder, so spin is scaled by the same factor. Oberlin's pitchers spin the ball at the same rate per mph as
+              MLB pitchers, about 24 to 25 rpm per mph on four-seams, so leaving spin alone would grade a translated
+              fastball as low-spin when it isn't. Separation is kept as the same percentage off the fastball, which keeps
+              the hitter's relative timing gap the same. Movement stays as thrown: when spin rises with speed, the extra
+              Magnus force and the shorter flight time cancel out, so the break is about the same. Every number on a
+              pitcher's page is still what he actually threw; only the model's view of the pitch is translated.
             </p>
             <p className="m-0">
               The D3 data also showed that velocity matters more at this level than in MLB: the jump in swing-and-miss rate

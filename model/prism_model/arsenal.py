@@ -208,9 +208,10 @@ def prepare(df: pd.DataFrame, ref: dict) -> pd.DataFrame:
 def d3_stuff(rows: pd.DataFrame, models: dict | None, d3ref: dict | None,
              shifts: dict | None = None) -> pd.DataFrame:
     """
-    Predict Stuff/Shape xRV. With a D3 reference, velocities are first moved to their MLB
-    equivalent by D3 percentile (``d3.translate``; or by the given per-pitcher ``shifts``),
-    and the velocity part of fastball Stuff is weighted by the D3 velocity weight.
+    Predict Stuff/Shape xRV. With a D3 reference, each pitch is graded as thrown at his MLB-equivalent
+    arm speed (``d3.translate`` + ``d3.model_inputs``: velocity, spin and separation scaled together; or by
+    the given per-pitcher velocity ``shifts`` ratios), and the velocity part of fastball Stuff is weighted by
+    the D3 velocity weight. Displayed values stay as thrown.
     """
     if d3ref is not None:
         if shifts is None:
@@ -218,9 +219,12 @@ def d3_stuff(rows: pd.DataFrame, models: dict | None, d3ref: dict | None,
         else:
             rows = rows.copy()
             rows["perceived_velo_d3"] = rows["perceived_velo"]
-            rows["velo_shift"] = rows["PitcherId"].map(shifts).fillna(0.0)
-            rows["perceived_velo"] = rows["perceived_velo"] + rows["velo_shift"]
-    rows = predict(rows, models)
+            rows["velo_ratio"] = rows["PitcherId"].map(shifts).fillna(1.0)
+    pred = predict(d3.model_inputs(rows), models)
+    rows = rows.copy()
+    for c in ("group", "stuff_xrv", "shape_xrv"):
+        if c in pred:
+            rows[c] = pred[c].to_numpy()
     if d3ref is not None:
         fb = rows["group"] == "Fastball"
         w = d3ref["velo_weight"]
@@ -345,7 +349,7 @@ def explain_stuff(rows: pd.DataFrame, ref: dict, models: dict | None) -> dict:
         if not m or not s.get("stuff_xrv_std"):
             continue
         feats = m["features"]
-        x = r[feats].astype(float).to_frame().T
+        x = d3.model_inputs(r.to_frame().T)[feats].astype(float)
         if r["stuff_basis"] == "type":
             peers = graded[graded["shape_family"] == r["shape_family"]]
             avg = peers[feats].mean()
@@ -377,8 +381,8 @@ def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
         pool = same  # compare like with like: sweepers with sweepers
     if pool.empty or pd.isna(r["velo"]):
         return None
-    shift = r.get("velo_shift", 0.0)
-    velo = r["velo"] + (shift if pd.notna(shift) else 0.0)  # D3-equivalent MLB speed when translated
+    ratio = r.get("velo_ratio", 1.0)
+    velo = r["velo"] * (ratio if pd.notna(ratio) else 1.0)  # D3-equivalent MLB speed when translated
     type_avg = np.average(pool["xrv100"], weights=pool["n"])
     for dv, dm in ((1.5, 2.0), (2.5, 3.0), (4.0, 4.0)):
         near = pool[((pool["velo"] - velo).abs() <= dv) & ((pool["ivb"] - r["ivb"]).abs() <= dm)
@@ -585,8 +589,8 @@ def progress(p: pd.DataFrame, season: pd.DataFrame, ref: dict, models: dict | No
     if sess.empty:
         return []
     shifts = None
-    if "velo_shift" in season and season["velo_shift"].notna().any():
-        shifts = {season["PitcherId"].iloc[0]: float(season["velo_shift"].iloc[0])}
+    if "velo_ratio" in season and season["velo_ratio"].notna().any():
+        shifts = {season["PitcherId"].iloc[0]: float(season["velo_ratio"].iloc[0])}
     sess = d3_stuff(sess, models, d3ref if scale == "d3" else None, shifts)
     out = []
     for _, r in sess.sort_values(["outing", "n"], ascending=[True, False]).iterrows():
@@ -851,7 +855,7 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
     if isinstance(sub, str) and "subtype" in pool and (pool["subtype"] == sub).sum() >= 40:
         pool = pool[pool["subtype"] == sub]
     plus = lambda x: 100 - 10 * (x - sc["stuff_xrv_mean"]) / sc["stuff_xrv_std"]
-    base = predict(pd.DataFrame([r]), models)["stuff_xrv"].iloc[0]
+    base = predict(d3.model_inputs(pd.DataFrame([r])), models)["stuff_xrv"].iloc[0]
     if pd.isna(base):
         return None
     now_plus = float(plus(base))
@@ -883,7 +887,7 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
         for c in cols:
             if c in grid:
                 grid[c] = grid[c] + deltas
-        g = plus(predict(grid, models)["stuff_xrv"]).to_numpy(float)
+        g = plus(predict(d3.model_inputs(grid), models)["stuff_xrv"]).to_numpy(float)
         if np.isnan(g).all():
             continue
         best = np.nanmax(g)
