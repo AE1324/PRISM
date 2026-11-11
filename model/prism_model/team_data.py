@@ -34,7 +34,8 @@ import pandas as pd
 
 from prism_data import awre as awre_io
 from prism_data import rapsodo
-from prism_data.clean import apply_decisions, attribute_wrong_pitcher, flag_basic, flag_shapes, load_decisions
+from prism_data.clean import (apply_decisions, apply_game_movement, attribute_wrong_pitcher, check_game_movement,
+                              flag_basic, flag_shapes, load_decisions)
 from prism_data.trackman import read_trackman
 from prism_data.match import match, merge
 from prism_data.paths import DATA_DIR, PROCESSED_DIR
@@ -57,6 +58,46 @@ def classify_clean(df: pd.DataFrame) -> pd.DataFrame:
     for col in SHAPE_COLUMNS:
         df[col] = np.nan if col not in ("shape_family", "subtype", "bucket") else None
         df.loc[out.index, col] = out[col]
+    return df
+
+
+TYPE_SCALE = {"RelSpeed": 2.0, "SpinRate": 150.0}   # mph, rpm: one "step" when matching by speed and spin
+TYPE_MAX_STEPS = 3.0
+
+
+def type_without_movement(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Give a pitch type to clean pitches that have speed and spin but no reliable movement, by matching
+    them to the pitcher's own pitch types from pitches that do have movement (nearest by velocity and
+    spin, within 3 steps of 2 mph / 150 rpm). Their movement stays blank, so they count toward velocity,
+    location and results but not the movement averages. Pitchers with no classified pitches are left out.
+    """
+    df = df.copy()
+    need = df["shape_family"].isna() & df["RelSpeed"].notna() & df["SpinRate"].notna() & (df["issues"].map(len) == 0)
+    if not need.any():
+        return df
+    known = df[df["shape_family"].notna()]
+    for pid, g in df[need].groupby("PitcherId"):
+        k = known[known["PitcherId"] == pid]
+        types = k.groupby("shape_family").filter(lambda x: len(x) >= 5).groupby("shape_family")
+        if not len(types):
+            continue
+        centers = types[list(TYPE_SCALE)].median()
+        info = types.agg({"subtype": lambda x: x.mode().iloc[0] if x.notna().any() else None,
+                          "bucket": "first"})
+        ref = k.iloc[0]
+        for idx, r in g.iterrows():
+            steps = ((centers - r[list(TYPE_SCALE)]).abs() / pd.Series(TYPE_SCALE)).max(axis=1)
+            if steps.min() > TYPE_MAX_STEPS:
+                continue
+            kind = steps.idxmin()
+            df.at[idx, "shape_family"] = kind
+            df.at[idx, "subtype"] = info.at[kind, "subtype"]
+            df.at[idx, "bucket"] = info.at[kind, "bucket"]
+            for c in ("fb_velo", "fb_ivb", "fb_hb"):
+                if c in df:
+                    df.at[idx, c] = ref.get(c)
+            df.at[idx, "notes"] = list(df.at[idx, "notes"]) + ["pitch type from speed and spin (no reliable movement)"]
     return df
 
 
@@ -103,10 +144,11 @@ def build(name: str, rapsodo_dir: Path, awre_dir: Path | None, decisions_path: P
 def build_trackman(folder: Path, decisions_path: Path | None = None, team: str | None = None,
                    inactive_path: Path | None = None) -> pd.DataFrame:
     """
-    TrackMan game exports through the same cleaning as Rapsodo: read every .csv/.xlsx export, keep one
-    team's pitchers (``team`` = TrackMan PitcherTeam code), flag misreads per pitcher per game (release
-    point checks use each game as its own stint), name the likely pitcher for wrong-side pitches, classify
-    the clean pitches, flag shape outliers, then apply saved review decisions. Results come from the
+    TrackMan game exports through the same cleaning as Rapsodo: read every .csv/.xlsx export, flag misreads
+    per pitcher per game (release point checks use each game as its own stint), name the likely pitcher for
+    wrong-side pitches, check each game's movement (blanked for games that can't be trusted), keep one
+    team's pitchers (``team`` = TrackMan PitcherTeam code), classify the clean pitches, flag shape outliers,
+    give pitches without movement a type from speed and spin, then apply saved review decisions. Results come from the
     export itself (count, call, exit velocity, launch angle), so there's no matching step.
     """
     gone = inactive(inactive_path) if inactive_path else set()
@@ -118,17 +160,23 @@ def build_trackman(folder: Path, decisions_path: Path | None = None, team: str |
         except (KeyError, ValueError):
             continue  # not a pitch-by-pitch export (e.g. a summary workbook)
     df = pd.concat(frames, ignore_index=True)
-    if team:
-        df = df[df["PitcherTeam"].astype(str) == team]
     df = df[~df["Pitcher"].map(rapsodo.clean_name).isin(gone)].reset_index(drop=True)
     df["stint"] = df["PitcherId"].astype(str) + "|" + df["GameID"].astype(str)
     if "PitchTime" not in df or df["PitchTime"].isna().all():
         df["PitchTime"] = pd.to_datetime(df["Date"].astype(str), errors="coerce")
+    decisions = load_decisions(decisions_path) if decisions_path else {}
     df = flag_basic(df)
     df = attribute_wrong_pitcher(df)
+    games = check_game_movement(df)
+    df = apply_game_movement(df, games, decisions)
+    if team:  # after the game check, which reads both teams' pitchers
+        df = df[df["PitcherTeam"].astype(str) == team].reset_index(drop=True)
     df = classify_clean(df)
     df = flag_shapes(df)
-    return apply_decisions(df, load_decisions(decisions_path) if decisions_path else {})
+    df = type_without_movement(df)
+    df = apply_decisions(df, decisions)
+    df.attrs["games"] = games
+    return df
 
 
 # --------------------------------------------------------------------------
@@ -146,10 +194,12 @@ def _result_text(r) -> str:
 
 
 def review_tables(df: pd.DataFrame, awre: pd.DataFrame | None, pairs: pd.DataFrame | None) -> dict:
-    has_note = df["notes"].map(len) > 0 if "notes" in df else False
+    # a whole game's blanked movement is shown once on the Games sheet, not on every pitch
+    game_note = lambda n: [x for x in n if not str(x).startswith("movement not used")]
+    has_note = df["notes"].map(lambda n: len(game_note(n)) > 0) if "notes" in df else False
     flagged = df[(df["issues"].map(len) > 0) | has_note].sort_values(["PitcherId", "PitchTime"])
     sheet = pd.DataFrame({
-        "Pitcher": flagged["PitcherId"],
+        "Pitcher": flagged["Pitcher"] if "Pitcher" in flagged else flagged["PitcherId"],
         "Date": flagged["PitchTime"].dt.strftime("%Y-%m-%d"),
         "Time": flagged["PitchTime"].dt.strftime("%I:%M:%S %p"),
         "Pitch ID": flagged["PitchUID"],
@@ -162,7 +212,7 @@ def review_tables(df: pd.DataFrame, awre: pd.DataFrame | None, pairs: pd.DataFra
         "Rel height": flagged["RelHeight"].round(2),
         "Rel side": flagged["RelSide"].round(2),
         "Result (AWRE)": [_result_text(r) for _, r in flagged.iterrows()],
-        "Why it's flagged": [ "; ".join(list(a) + list(b)) for a, b in zip(flagged["issues"], flagged["notes"])],
+        "Why it's flagged": ["; ".join(list(a) + game_note(b)) for a, b in zip(flagged["issues"], flagged["notes"])],
         "PRISM's call": np.where(flagged["exclude"], "drop", "keep"),
         "Your call (keep/drop)": flagged["review"].replace("", np.nan),
         "Note": "",
@@ -200,7 +250,25 @@ def review_tables(df: pd.DataFrame, awre: pd.DataFrame | None, pairs: pd.DataFra
         match_check = chk[["pitcher", "date", "AWRE time", "Rapsodo time", "awre_velo", "rap_velo", "lag_s"]].rename(
             columns={"pitcher": "Pitcher", "date": "Date", "awre_velo": "AWRE velo", "rap_velo": "Rapsodo velo",
                      "lag_s": "AWRE minus Rapsodo (s)"})
-    return {"Summary": summary, "Flagged pitches": sheet, "Tags vs PRISM": tags, "Match check": match_check}
+    games = None
+    g = df.attrs.get("games")
+    if g is not None and len(g):
+        calls = df.drop_duplicates("GameID").set_index("GameID")["movement_trusted"] if "movement_trusted" in df else {}
+        games = pd.DataFrame({
+            "Game": g["GameID"],
+            "Pitches": g["pitches"],
+            "No reliable movement": (g["missing_share"] * 100).round(0).astype(int).astype(str) + "%",
+            "Field ride offset (in)": g["field_ride_offset_in"],
+            "Field run offset (in)": g["field_run_offset_in"],
+            "Same-pitcher ride offset (in)": g["ride_offset_in"],
+            "Why": g["reason"].replace("", "looks normal"),
+            "PRISM's call": np.where(g["trusted"], "trust", "distrust"),
+            "Your call (trust/distrust)": [
+                ("trust" if calls.get(x) else "distrust") if bool(calls.get(x, t)) != bool(t) else np.nan
+                for x, t in zip(g["GameID"], g["trusted"])],
+        })
+    return {"Summary": summary, "Games": games, "Flagged pitches": sheet, "Tags vs PRISM": tags,
+            "Match check": match_check}
 
 
 def write_review(tables: dict, path: Path) -> None:
@@ -217,6 +285,7 @@ def write_review(tables: dict, path: Path) -> None:
         "Summary: pitches per pitcher, how many were flagged, and how many AWRE results were matched.",
         "Tags vs PRISM: Rapsodo's pitch tag against PRISM's shape-based type, for a sanity check. Tags are never used for grading.",
         "Match check: AWRE-Rapsodo pairs whose velocity or timing didn't agree well. Their results are still used.",
+        "Games (TrackMan): whether each game's movement readings can be trusted. A distrusted game's pitches still count for velocity, location and results, just not movement, Stuff+ or Shape+. Type trust or distrust in 'Your call' to overrule.",
     ]})
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         notes.to_excel(xw, "Read me", index=False)
@@ -233,6 +302,13 @@ def write_review(tables: dict, path: Path) -> None:
             for i, col in enumerate(ws.iter_cols(min_row=1, max_row=min(ws.max_row, 200)), 1):
                 width = max(len(str(c.value)) if c.value is not None else 0 for c in col)
                 ws.column_dimensions[get_column_letter(i)].width = min(max(10, width + 2), 70)
+        if "Games" in xw.book.sheetnames and xw.book["Games"].max_row > 1:
+            gs = xw.book["Games"]
+            ghdr = [c.value for c in gs[1]]
+            gcol = get_column_letter(ghdr.index("Your call (trust/distrust)") + 1)
+            gdv = DataValidation(type="list", formula1='"trust,distrust"', allow_blank=True)
+            gs.add_data_validation(gdv)
+            gdv.add(f"{gcol}2:{gcol}{gs.max_row}")
         ws = xw.book["Flagged pitches"]
         hdr = [c.value for c in ws[1]]
         if "Your call (keep/drop)" in hdr and ws.max_row > 1:

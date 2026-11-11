@@ -69,6 +69,12 @@ MOVEMENT = ["SpinAxis", "Tilt", "VertBreak", "InducedVertBreak", "HorzBreak", "p
 RELEASE = ["RelHeight", "RelSide", "Extension", "VertRelAngle", "HorzRelAngle"]
 
 
+def clean_id(s: pd.Series) -> pd.Series:
+    """TrackMan IDs as plain strings: Excel stores some as numbers, so '1000139061.0' -> '1000139061'."""
+    out = s.astype("string").str.strip().str.replace(r"\.0+$", "", regex=True)
+    return out.where(out.notna() & (out != "") & (out.str.lower() != "nan"))
+
+
 def read_trackman(path: str | Path) -> pd.DataFrame:
     path = Path(path)
     if path.suffix.lower() in (".xlsx", ".xls"):
@@ -78,7 +84,9 @@ def read_trackman(path: str | Path) -> pd.DataFrame:
     df = raw.copy()
 
     df["Source"] = "trackman"
-    df["PitcherId"] = df["PitcherId"].astype("string")
+    for col in ("PitcherId", "BatterId", "CatcherId"):
+        if col in df:
+            df[col] = clean_id(df[col])
     df["PitcherThrows"] = df["PitcherThrows"].map(HAND)
     df["BatterSide"] = df["BatterSide"].map(HAND) if "BatterSide" in df else pd.NA
     df["Pitcher"] = df["Pitcher"] if "Pitcher" in df else df["PitcherId"]

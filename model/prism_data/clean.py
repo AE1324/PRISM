@@ -15,6 +15,10 @@ Checks before classification
   wrong hand       released from the opposite side to every other pitch he throws
   wrong pitcher    (game data) a wrong-side pitch whose release matches another pitcher in the
                    same game: named in the flag, since the operator likely didn't switch pitchers
+  game movement    (game data) a whole game whose movement can't be trusted: most pitches have no
+                   reliable movement, or pitchers who also threw in other games read far off their
+                   usual ride/run there (a calibration problem that day). Movement is blanked for
+                   that game; its pitches still count for velocity, location and results.
   release point    far from his release point in that stint
   spin misread     almost no spin with real movement (the ball can't move like that
                    without spin), or a spin value outside what's possible
@@ -214,19 +218,127 @@ def attribute_wrong_pitcher(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+MOVEMENT_COLUMNS = ["InducedVertBreak", "HorzBreak", "hb_arm", "SpinAxis", "VertBreak", "pfxx", "pfxz"]
+GAME_MISSING_SHARE = 0.5   # a game with more than this share of pitches missing movement isn't trusted
+GAME_OFFSET_IN = 3.0       # fastball ride or run this far off the same pitchers' other games
+GAME_MIN_FASTBALLS = 5
+GAME_MIN_PITCHERS = 5
+
+
+def check_game_movement(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    One row per game: whether its movement can be trusted, and why not. TrackMan calibration is per game,
+    so a bad day shifts every pitcher the same way. Checks, in order:
+
+    1. Missing: more than half the game's pitches have no reliable movement (TrackMan's low confidence).
+    2. Whole field: the median fastball ride/run of every pitcher in the game (3+ fastballs each, 5+
+       pitchers) vs the median of the other games. Over 3 in on either flags the game.
+    3. Same pitchers, only when the whole-field read isn't available: the median gap between a pitcher's
+       fastball ride/run here and in his other games, compared only against games that passed 1-2, so one
+       bad game can't make a good one look off.
+    Fastballs = a pitcher's top 30% by velocity in that game.
+    """
+    if "GameID" not in df:
+        return pd.DataFrame(columns=["GameID", "trusted", "reason"])
+    clean = df[df["issues"].map(len) == 0] if "issues" in df else df
+    v70 = clean.groupby(["PitcherId", "GameID"])["RelSpeed"].transform(lambda x: x.quantile(0.7))
+    fb = clean[clean["RelSpeed"] >= v70].dropna(subset=["InducedVertBreak", "hb_arm"])
+    per = fb.groupby(["GameID", "PitcherId"]).agg(n=("RelSpeed", "size"), ivb=("InducedVertBreak", "median"),
+                                                  hb=("hb_arm", "median")).reset_index()
+    field = per[per["n"] >= 3].groupby("GameID").agg(k=("ivb", "size"), ivb=("ivb", "median"), hb=("hb", "median"))
+    field = field[field["k"] >= GAME_MIN_PITCHERS]
+    big = lambda x: not np.isnan(x) and abs(x) > GAME_OFFSET_IN
+    say = lambda i, h: ", ".join(([f"ride {i:+.1f} in"] if big(i) else []) + ([f"run {h:+.1f} in"] if big(h) else []))
+
+    rows = {}
+    for game, g in df.groupby("GameID"):
+        missing = float(g["InducedVertBreak"].isna().mean())
+        f_ivb = f_hb = np.nan
+        if game in field.index and len(field) >= 3:
+            rest = field.drop(index=game)
+            f_ivb = float(field.at[game, "ivb"] - rest["ivb"].median())
+            f_hb = float(field.at[game, "hb"] - rest["hb"].median())
+        reason = ""
+        if missing > GAME_MISSING_SHARE:
+            reason = f"{missing:.0%} of pitches have no reliable movement"
+        elif big(f_ivb) or big(f_hb):
+            reason = (f"every pitcher's fastball movement reads off vs the other games ({say(f_ivb, f_hb)}, "
+                      f"{int(field.at[game, 'k'])} pitchers)")
+        rows[game] = {"GameID": game, "pitches": len(g), "missing_share": round(missing, 2),
+                      "field_ride_offset_in": None if np.isnan(f_ivb) else round(f_ivb, 1),
+                      "field_run_offset_in": None if np.isnan(f_hb) else round(f_hb, 1),
+                      "ride_offset_in": None, "run_offset_in": None, "pitchers_compared": 0, "reason": reason,
+                      "_field": not np.isnan(f_ivb)}
+
+    good = {g for g, r in rows.items() if not r["reason"]}
+    same = per[(per["n"] >= GAME_MIN_FASTBALLS) & per["GameID"].isin(good)]
+    for game, r in rows.items():
+        gaps_ivb, gaps_hb = [], []
+        for _, p in per[(per["GameID"] == game) & (per["n"] >= GAME_MIN_FASTBALLS)].iterrows():
+            other = same[(same["PitcherId"] == p["PitcherId"]) & (same["GameID"] != game)]
+            if not other.empty:
+                gaps_ivb.append(p["ivb"] - other["ivb"].median())
+                gaps_hb.append(p["hb"] - other["hb"].median())
+        if not gaps_ivb:
+            continue
+        o_ivb, o_hb = float(np.median(gaps_ivb)), float(np.median(gaps_hb))
+        r.update(ride_offset_in=round(o_ivb, 1), run_offset_in=round(o_hb, 1), pitchers_compared=len(gaps_ivb))
+        if not r["reason"] and not r["_field"] and (big(o_ivb) or big(o_hb)):
+            n = len(gaps_ivb)
+            r["reason"] = (f"movement reads off vs the same pitchers' other games ({say(o_ivb, o_hb)}, "
+                           f"{n} pitcher{'s' if n != 1 else ''} compared)")
+    out = pd.DataFrame(rows.values()).drop(columns="_field")
+    out["trusted"] = out["reason"] == ""
+    return out
+
+
+def apply_game_movement(df: pd.DataFrame, games: pd.DataFrame, decisions: dict | None = None) -> pd.DataFrame:
+    """
+    Blank movement for games that aren't trusted (a person can overrule per game with a decision of
+    'trust' or 'distrust' keyed 'game:<GameID>'). Adds ``movement_trusted`` per pitch and a note.
+    """
+    df = df.copy()
+    decisions = decisions or {}
+    trusted = dict(zip(games["GameID"], games["trusted"]))
+    reasons = dict(zip(games["GameID"], games["reason"]))
+    for game in list(trusted):
+        call = decisions.get(f"game:{game}")
+        if call in ("trust", "distrust"):
+            trusted[game] = call == "trust"
+            reasons[game] = reasons[game] or "set by review"
+    df["movement_trusted"] = df["GameID"].map(trusted).fillna(True).astype(bool)
+    bad = ~df["movement_trusted"]
+    for c in MOVEMENT_COLUMNS:
+        if c in df:
+            df.loc[bad, c] = np.nan
+    if "notes" in df:
+        for idx in df.index[bad]:
+            df.at[idx, "notes"] = list(df.at[idx, "notes"]) + [f"movement not used: {reasons.get(df.at[idx, 'GameID'], '')}"]
+    return df
+
+
 def load_decisions(path: str | Path) -> dict:
-    """PitchUID -> 'keep' | 'drop' from a saved decisions CSV or a filled-in review workbook."""
+    """
+    PitchUID -> 'keep' | 'drop' from a saved decisions CSV or a filled-in review workbook. Game-level
+    movement calls come in as 'game:<GameID>' -> 'trust' | 'distrust'.
+    """
     path = Path(path)
     if not path.exists():
         return {}
     if path.suffix.lower() in (".xlsx", ".xls"):
         d = pd.read_excel(path, sheet_name="Flagged pitches")
         d = d.rename(columns={"Your call (keep/drop)": "decision", "Pitch ID": "PitchUID"})
+        sheets = pd.ExcelFile(path).sheet_names
+        if "Games" in sheets:  # TrackMan: per-game movement calls
+            g = pd.read_excel(path, sheet_name="Games").rename(columns={"Your call (trust/distrust)": "decision"})
+            if "decision" in g:
+                g["PitchUID"] = "game:" + g["Game"].astype(str)
+                d = pd.concat([d, g[["PitchUID", "decision"]]], ignore_index=True)
     else:
         d = pd.read_csv(path)
     d = d.dropna(subset=["decision"])
     d["decision"] = d["decision"].astype(str).str.strip().str.lower()
-    d = d[d["decision"].isin(["keep", "drop"])]
+    d = d[d["decision"].isin(["keep", "drop", "trust", "distrust"])]
     return dict(zip(d["PitchUID"].astype(str), d["decision"]))
 
 
