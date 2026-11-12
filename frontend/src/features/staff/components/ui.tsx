@@ -145,7 +145,7 @@ export function TargetTable({ pitch }: { pitch: Pitch }) {
             <tr key={r.trait}>
               <td>{r.label}</td>
               <td className={`num ${r.in_range ? "in" : "out"}`}>{fmt(r.trait, r.now)} {r.unit}</td>
-              <td className="num">{r.in_range && !r.vs_fb ? <span className="soft">on target</span> : r.target_text}</td>
+              <td className="num">{r.beyond ? <span className="soft">{r.target_text}</span> : r.in_range && !r.vs_fb ? <span className="soft">on target</span> : r.target_text}</td>
               <td className="num">{r.in_range ? <span className="soft">–</span> : <b>{signed(r.gain, 0)}</b>}</td>
             </tr>
           ))}

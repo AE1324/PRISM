@@ -84,16 +84,52 @@ def is_slurve(m: dict) -> bool:
     return m["glove"] >= 6 and m["ivb"] <= -4 and m["glove"] >= -m["ivb"] * 0.9
 
 
-# Subtype tags, applied to a pitcher's median shape for each pitch type.
-# Movement in inches; "glove" is glove-side break (positive = toward the glove
-# side). Rules are checked in order and the first match wins; the last entry is
-# the default. Pitch types not listed here get no subtype. Starting points to
-# tune by eye on real staffs.
+# Subtype tags, applied to a pitcher's median shape for each pitch type. They describe the pitch; they don't
+# decide what it's compared with (targets and comparisons use the MLB pitches most like it, arsenal.similar_pool).
+# Movement in inches; "glove" is glove-side break (positive = toward the glove side), "hb" arm-side run,
+# "ivb_diff"/"hb_diff" this pitch minus his primary fastball. Rules are checked in order; the first match wins.
+#
+# Four-seam zones (ride = IVB, run = arm-side HB, inches), the standard fastball-shape tags:
+#   Cut-ride  IVB 14+, run under 6     Ride   IVB 14+, run 6-12     Ride-run  IVB 14+, run over 12
+#   Cut       IVB under 14, run under 6                             Run       IVB under 14, run over 14
+#   Deadzone  IVB 10-14 and run 10-14 (where MLB four-seams grade worst)
+# A shape in the gaps between zones (IVB under 14 with run 6-10, or IVB under 10 with run 10-14) takes the
+# nearest zone; ties go to deadzone. A pitcher's tag also limits what his fastball is compared with and how far
+# its targets reach: a cut fastball isn't asked to become a ride-run one (that comes from how he releases the
+# ball), while a deadzone fastball is pushed out toward whichever shape grades better.
+FB_ZONES = {   # tag -> (ivb low, ivb high, run low, run high); None = open
+    "Cut-ride": (14.0, None, None, 6.0),
+    "Ride": (14.0, None, 6.0, 12.0),
+    "Ride-run": (14.0, None, 12.0, None),
+    "Cut": (None, 14.0, None, 6.0),
+    "Run": (None, 14.0, 14.0, None),
+    "Deadzone": (10.0, 14.0, 10.0, 14.0),
+}
+# Tags that are the weak version of the pitch: their targets may move toward any shape.
+OPEN_TAGS = ("Deadzone", "Firm")
+
+
+def _zone_gap(ivb: float, hb: float, zone) -> float:
+    """Distance (in) from a shape to a zone; 0 inside it."""
+    lo_v, hi_v, lo_h, hi_h = zone
+    dv = max((lo_v - ivb) if lo_v is not None else 0, (ivb - hi_v) if hi_v is not None else 0, 0)
+    dh = max((lo_h - hb) if lo_h is not None else 0, (hb - hi_h) if hi_h is not None else 0, 0)
+    return float(np.hypot(dv, dh))
+
+
+def fastball_zone(ivb: float, hb: float) -> str:
+    """The four-seam tag for a shape: the zone it's in, else the nearest (ties to deadzone)."""
+    gaps = {tag: _zone_gap(ivb, hb, z) for tag, z in FB_ZONES.items()}
+    best = min(gaps.values())
+    return "Deadzone" if gaps["Deadzone"] <= best + 1e-9 else min(gaps, key=gaps.get)
+
+
+# Changeup, relative to his fastball (the separation is the pitch). From MLB run values by drop x extra run vs
+# the fastball: 9+ in less ride grades well whatever the run; 6+ in more run grades well, best with depth too;
+# the weak spot is a changeup with under 6 in of drop and under 6 in of extra run (firm: too close to the fastball).
+CH_DROP_IN, CH_FADE_IN, CH_FIRM_IN = 9.0, 6.0, 6.0
 SUBTYPE_RULES = {
-    "Four-seam": [
-        ("Ride", lambda m: m["ivb"] >= 14),
-        ("Flat", lambda m: True),
-    ],
+    "Four-seam": [(tag, (lambda t: lambda m: fastball_zone(m["ivb"], m["hb"]) == t)(tag)) for tag in FB_ZONES],
     "Slider": [
         ("Sweeper", lambda m: m["glove"] >= 10 and m["ivb"] > -4),
         ("Gyro", lambda m: m["glove"] < 5),
@@ -105,9 +141,11 @@ SUBTYPE_RULES = {
         ("Standard", lambda m: True),
     ],
     "Changeup": [
-        # More arm-side run than the fastball vs. spin killed mainly for drop.
-        ("Fade", lambda m: m["hb_diff"] >= 4),
-        ("Drop", lambda m: True),
+        ("Fade-drop", lambda m: m["hb_diff"] >= CH_FADE_IN and m["ivb_diff"] <= -CH_DROP_IN),
+        ("Fade", lambda m: m["hb_diff"] >= CH_FADE_IN),
+        ("Drop", lambda m: m["ivb_diff"] <= -CH_DROP_IN),
+        ("Firm", lambda m: m["ivb_diff"] > -CH_FIRM_IN),
+        ("Standard", lambda m: True),
     ],
 }
 
@@ -247,7 +285,8 @@ def train(years: list[int]) -> dict:
 def subtype_for(pitch_type: str, shape: dict) -> str | None:
     """The subtype for one pitch type given its median shape, or None if unknown."""
     rules = SUBTYPE_RULES.get(pitch_type)
-    if not rules or any(pd.isna(v) for v in shape.values()):
+    need = {"Four-seam": ("ivb", "hb"), "Changeup": ("ivb_diff", "hb_diff")}.get(pitch_type, ("ivb", "glove"))
+    if not rules or any(pd.isna(shape.get(k)) for k in need):
         return None
     for name, test in rules:
         if test(shape):
@@ -264,14 +303,15 @@ def assign_subtypes(df: pd.DataFrame, by: list[str] | None = None) -> pd.DataFra
     by = (by or ["PitcherId", "Season"]) + ["shape_family"]
     feats = shape_features(df)
     work = pd.concat([df[by], feats], axis=1).dropna(subset=["shape_family"])
-    med = work.groupby(by)[["InducedVertBreak", "hb_arm", "hb_diff", "spin_ratio"]].median().reset_index()
+    med = work.groupby(by)[["InducedVertBreak", "hb_arm", "hb_diff", "ivb_diff", "spin_ratio"]].median().reset_index()
     shapes = [
-        {"ivb": r.InducedVertBreak, "glove": -r.hb_arm, "hb_diff": r.hb_diff, "spin_ratio": r.spin_ratio}
+        {"ivb": r.InducedVertBreak, "glove": -r.hb_arm, "hb": r.hb_arm, "hb_diff": r.hb_diff, "ivb_diff": r.ivb_diff,
+         "spin_ratio": r.spin_ratio}
         for r in med.itertuples()
     ]
     # A slurve-shaped "slider" is filed as a curveball, so every slurve shares one tag.
     med["new_family"] = [
-        "Curveball" if fam == "Slider" and not any(pd.isna(v) for v in m.values()) and is_slurve(m) else fam
+        "Curveball" if fam == "Slider" and not any(pd.isna(m[k]) for k in ("ivb", "glove")) and is_slurve(m) else fam
         for fam, m in zip(med["shape_family"], shapes)
     ]
     med["subtype"] = [subtype_for(fam, m) for fam, m in zip(med["new_family"], shapes)]

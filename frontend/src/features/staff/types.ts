@@ -26,6 +26,7 @@ export interface TargetRow {
   best_delta: number;
   in_range: boolean;
   target_text?: string;
+  beyond?: "more" | "less";
   hide?: boolean;
   vs_fb?: boolean;
   fb_velo?: number;

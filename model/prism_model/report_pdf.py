@@ -323,7 +323,7 @@ def needs_work_card(r: dict) -> str:
             cls = "in" if row["in_range"] else "out"
             fmt = {"ivb": lambda v: f"{v:+.1f}", "hb": lambda v: f"{v:+.1f}", "spin": lambda v: f"{v:,.0f}"}.get(
                 row["trait"], lambda v: f"{v:.1f}")
-            target = "already there" if row["in_range"] and not row.get("vs_fb") else row.get("target_text", "")
+            target = row["target_text"] if row.get("beyond") else ("already there" if row["in_range"] and not row.get("vs_fb") else row.get("target_text", ""))
             gain = "–" if row["in_range"] else f'{row["gain"]:+.0f}'
             H.append(f'<tr><td>{_e(row["label"])}</td><td class="num {cls}">{fmt(row["now"])} {row["unit"]}</td>'
                      f'<td class="num">{target}</td><td class="num">{gain}</td></tr>')
@@ -354,7 +354,7 @@ def _target_table(t: dict, p: dict) -> str:
         cls = "in" if row["in_range"] else "out"
         fmt = {"ivb": lambda v: f"{v:+.1f}", "hb": lambda v: f"{v:+.1f}", "spin": lambda v: f"{v:,.0f}",
                "gap": lambda v: f"{-v:.1f}"}.get(row["trait"], lambda v: f"{v:.1f}")
-        target = "already there" if row["in_range"] else row.get("target_text", "")
+        target = row["target_text"] if row.get("beyond") else ("already there" if row["in_range"] else row.get("target_text", ""))
         if row.get("vs_fb"):  # the speed range always shows; it's set off his fastball and moves with it
             target, fb_note = row.get("target_text", ""), row["fb_velo"]
         if row["trait"] == "gap" and not row["in_range"]:

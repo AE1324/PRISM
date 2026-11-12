@@ -65,9 +65,16 @@ def test_every_pitch_type_has_a_bucket_and_cutters_are_fastballs():
 
 
 @pytest.mark.parametrize("pitch_type, shape, expected", [
-    ("Four-seam", dict(ivb=19, glove=-8, hb_diff=0, spin_ratio=1), "Ride"),
-    ("Four-seam", dict(ivb=15, glove=-8, hb_diff=0, spin_ratio=1), "Ride"),
-    ("Four-seam", dict(ivb=12, glove=-8, hb_diff=0, spin_ratio=1), "Flat"),
+    # four-seams by the standard zones (ride = ivb, arm-side run = hb)
+    ("Four-seam", dict(ivb=18, hb=8), "Ride"),
+    ("Four-seam", dict(ivb=16.5, hb=5.9), "Cut-ride"),
+    ("Four-seam", dict(ivb=20.1, hb=12.9), "Ride-run"),
+    ("Four-seam", dict(ivb=11.4, hb=3.0), "Cut"),
+    ("Four-seam", dict(ivb=10.7, hb=19.3), "Run"),
+    ("Four-seam", dict(ivb=12, hb=12), "Deadzone"),
+    ("Four-seam", dict(ivb=12, hb=8), "Deadzone"),     # gap, equally near cut and deadzone: deadzone
+    ("Four-seam", dict(ivb=12, hb=7), "Cut"),          # gap, nearer cut
+    ("Four-seam", dict(ivb=7, hb=13.5), "Run"),        # gap, nearer run
     ("Sinker", dict(ivb=6, glove=-16, hb_diff=8, spin_ratio=1), None),
     ("Cutter", dict(ivb=9, glove=2, hb_diff=-10, spin_ratio=1), None),
     ("Slider", dict(ivb=1, glove=14, hb_diff=-20, spin_ratio=1.1), "Sweeper"),
@@ -76,8 +83,12 @@ def test_every_pitch_type_has_a_bucket_and_cutters_are_fastballs():
     ("Curveball", dict(ivb=-14, glove=2, hb_diff=-10, spin_ratio=1.1), "12-6"),
     ("Curveball", dict(ivb=-8, glove=12, hb_diff=-20, spin_ratio=1.1), "Slurve"),
     ("Curveball", dict(ivb=-14, glove=7, hb_diff=-16, spin_ratio=1.1), "Standard"),
-    ("Changeup", dict(ivb=6, glove=-15, hb_diff=6, spin_ratio=0.8), "Fade"),
-    ("Changeup", dict(ivb=3, glove=-10, hb_diff=1, spin_ratio=0.6), "Drop"),
+    # changeups by separation from his own fastball
+    ("Changeup", dict(ivb_diff=-11, hb_diff=7), "Fade-drop"),
+    ("Changeup", dict(ivb_diff=-5.2, hb_diff=7.7), "Fade"),   # Bryant: runs much more than his cutting fastball
+    ("Changeup", dict(ivb_diff=-14.3, hb_diff=0.8), "Drop"),
+    ("Changeup", dict(ivb_diff=-2.2, hb_diff=-5.9), "Firm"),
+    ("Changeup", dict(ivb_diff=-8.1, hb_diff=3.9), "Standard"),  # Serrano: off a high-run sinker
     ("Splitter", dict(ivb=3, glove=-10, hb_diff=1, spin_ratio=0.5), None),
 ])
 def test_subtype_rules(pitch_type, shape, expected):

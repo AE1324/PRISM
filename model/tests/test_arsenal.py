@@ -254,3 +254,25 @@ def test_pitch_plus_needs_15_pitches_vs_hitters():
     assert MIN_GAME_FOR_PITCH_PLUS == 15
     # pitch_plus itself still computes; the gate lives in grade_rows / the report entry
     assert pitch_plus(110, 100, 90, 14) is not None
+
+
+def test_similar_pool_compares_changeups_by_separation_off_a_similar_fastball():
+    import pandas as pd
+    from prism_model.arsenal import similar_pool
+    rng = np.random.default_rng(0)
+    n = 600
+    mlb = pd.DataFrame({"shape_family": "Changeup", "velo_diff": rng.normal(-9, 2, n), "ivb_diff": rng.normal(-8, 3, n),
+                        "hb_diff": rng.normal(4, 3, n), "spin": rng.normal(1700, 200, n)})
+    mlb["ivb"] = rng.normal(16, 2, n) + mlb["ivb_diff"]
+    fb_hb = np.where(np.arange(n) < 300, 7.0, 15.0)          # half off four-seams, half off high-run sinkers
+    mlb["hb"] = fb_hb + mlb["hb_diff"]
+    me = pd.Series({"shape_family": "Changeup", "bucket": "Offspeed", "velo_diff": -7.6, "ivb_diff": -8.1, "hb_diff": 3.9,
+                    "ivb": 6.2, "hb": 18.3, "spin": 1636})
+    pool = similar_pool(me, mlb)
+    assert 60 <= len(pool) <= 150
+    assert (pool["hb"] - pool["hb_diff"]).mean() > 12          # mostly changeups off high-run fastballs
+
+
+def test_rare_movement_gets_no_target():
+    from prism_model.arsenal import SUPPORT_Q
+    assert SUPPORT_Q == 0.03

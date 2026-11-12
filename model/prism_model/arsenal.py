@@ -44,7 +44,7 @@ from prism_data import sessions
 from prism_data.paths import DATA_DIR
 from prism_model import d3, fastball_traits, references, results_tiers
 from prism_model.references import RATE_COLUMNS, add_flags, num, location_score, result_values, results_score
-from prism_model.shapes import BUCKET
+from prism_model.shapes import BUCKET, FB_ZONES, OPEN_TAGS
 from prism_model.stuff import GROUPS, aggregate, predict, to_plus
 
 REPORTS_DIR = DATA_DIR / "reports"
@@ -431,15 +431,75 @@ def explain_stuff(rows: pd.DataFrame, ref: dict, models: dict | None) -> dict:
     return out
 
 
+# Who a pitch is compared with: the MLB pitcher-season pitch types of the same family most like it. Fastballs by
+# their own shape; everything else by how it separates from his fastball (the separation is the pitch), plus the
+# fastball it comes off (a changeup off a high-run sinker is compared with changeups off high-run fastballs).
+SIMILAR_FEATURES = {
+    "Fastball": {"ivb": 1.0, "hb": 1.0, "spin": 0.5, "rel_height": 0.5},
+    "other": {"velo_diff": 1.0, "ivb_diff": 1.0, "hb_diff": 1.0, "fb_ivb": 0.5, "fb_hb": 0.5, "spin": 0.5},
+}
+SIMILAR_SHARE, SIMILAR_MIN, SIMILAR_MAX = 0.15, 60, 150
+# Beyond this share of MLB at either end, the Stuff model has almost nothing like the pitch to learn from:
+# a movement trait out there is part of what the pitch is, and isn't targeted toward the middle.
+SUPPORT_Q = 0.03
+
+
+_MLB_TAGS: dict = {}
+
+
+def mlb_tags(fam: pd.DataFrame, kind: str) -> pd.Series:
+    """Each MLB pitcher-season's subtype by the same rules as ours (cached per pitch type)."""
+    from prism_model.shapes import subtype_for
+
+    key = (kind, len(fam), float(fam["ivb"].sum()) if "ivb" in fam else 0.0)
+    if key not in _MLB_TAGS:
+        get = lambda row, c: row[c] if c in row and pd.notna(row[c]) else np.nan
+        _MLB_TAGS[key] = pd.Series([
+            subtype_for(kind, {"ivb": get(row, "ivb"), "hb": get(row, "hb"), "glove": -get(row, "hb"),
+                               "ivb_diff": get(row, "ivb_diff"), "hb_diff": get(row, "hb_diff")})
+            for _, row in fam.iterrows()], index=fam.index, dtype=object)
+    return _MLB_TAGS[key]
+
+
+def similar_pool(r: pd.Series, mlb_rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    The MLB pitches of his pitch type most like his (15% of them, 60-150), nearest first, among those with
+    the same subtype (a sweeper among sweepers, a cut fastball among cut fastballs), so a pitch is never
+    graded toward a shape his delivery can't make. Weak shapes (deadzone four-seams, firm changeups) are
+    compared with the whole pitch type so their targets can move them out.
+    """
+    from prism_model.shapes import OPEN_TAGS
+
+    fam = mlb_rows[mlb_rows["shape_family"] == r["shape_family"]].copy()
+    if fam.empty:
+        return fam
+    sub = r.get("subtype")
+    if isinstance(sub, str) and sub not in OPEN_TAGS:
+        same = fam[mlb_tags(fam, r["shape_family"]) == sub]
+        if len(same) >= SIMILAR_MIN:
+            fam = same
+    if "ivb_diff" in fam:
+        fam["fb_ivb"] = fam["ivb"] - fam["ivb_diff"]
+        fam["fb_hb"] = fam["hb"] - fam["hb_diff"]
+    me = r.copy()
+    if pd.notna(me.get("ivb_diff")):
+        me["fb_ivb"], me["fb_hb"] = me["ivb"] - me["ivb_diff"], me["hb"] - me["hb_diff"]
+    feats = SIMILAR_FEATURES["Fastball" if r.get("bucket") == "Fastball" else "other"]
+    feats = {c: w for c, w in feats.items() if c in fam and pd.notna(me.get(c)) and fam[c].notna().any()}
+    if not feats:
+        return fam
+    d = np.zeros(len(fam))
+    for c, w in feats.items():
+        sd = fam[c].std() or 1.0
+        d += w * ((fam[c] - float(me[c])) / sd).fillna(10.0).to_numpy() ** 2
+    k = int(min(SIMILAR_MAX, max(SIMILAR_MIN, SIMILAR_SHARE * len(fam))))
+    return fam.assign(_dist=d).nsmallest(k, "_dist")
+
+
 def comparable_pitches(r: pd.Series, mlb_rows: pd.DataFrame) -> dict | None:
     """MLB pitcher-seasons with a similar pitch, and how they did versus the average of that pitch type."""
     pool = mlb_rows[mlb_rows["shape_family"] == r["shape_family"]].dropna(subset=["xrv100"])
-    sub = r.get("subtype")
-    same = pool[pool["subtype"] == sub] if isinstance(sub, str) and "subtype" in pool else pool
-    by_sub = isinstance(sub, str) and "subtype" in pool and len(same) >= 40
-    label = f"{sub.lower()}s" if by_sub else f"{r['shape_family'].lower()}s"
-    if by_sub:
-        pool = same  # compare like with like: sweepers with sweepers
+    label = f"{r['shape_family'].lower()}s"
     if pool.empty or pd.isna(r["velo"]):
         return None
     ratio = r.get("velo_ratio", 1.0)
@@ -705,7 +765,11 @@ def movement_profile(p: pd.DataFrame, rows: pd.DataFrame) -> list[dict]:
 
 FB_ROLE = {
     "Ride": "a riding four-seam: it lives at the top of the zone and above it, where the carry beats bats",
-    "Flat": "a four-seam without much carry: it plays best located to the edges rather than up",
+    "Cut-ride": "a cut-riding four-seam: carry plus a little cut, so it stays on the barrel's top edge and away from arm-side hitters",
+    "Ride-run": "a ride-run four-seam: carry and arm-side run together, best up and to the arm side",
+    "Cut": "a cutting four-seam: little run, so it plays glove side and off the barrel more than up",
+    "Run": "a running four-seam: lots of arm-side run, so it plays to the arm side and in on same-side hitters",
+    "Deadzone": "a deadzone four-seam: not enough carry to ride and not enough run or cut to move off barrels, so location carries it",
     "Sinker": "a sinker: it works down and to the arm side for ground balls and early-count contact",
     "Cutter": "a cutter: it moves glove side off the barrel and plays as a contact-management fastball",
 }
@@ -720,8 +784,8 @@ def fastball_role(rows: pd.DataFrame, traits: dict | None = None) -> dict | None
     role = f"His main fastball is {FB_ROLE.get(key, key.lower())}."
     flat = (traits is not None and traits["pitch"] == r["shape_family"]
             and traits["vaa_ae_pct_mlb"] >= fastball_traits.HIGH)
-    if flat and key == "Flat":
-        role = ("His main fastball is a four-seam without much carry, but his release gives it a flat approach angle, "
+    if flat and key in ("Deadzone", "Run", "Cut"):
+        role = (f"His main fastball is {FB_ROLE[key].split(':')[0]}, but his release gives it a flat approach angle, "
                 "so it still plays at the top of the zone.")
     return {"pitch": r["shape_family"], "subtype": key, "velo": _num(r["velo"]), "ivb": _num(r["ivb"]),
             "hb_arm": _num(r["hb"]), "role": role}
@@ -900,21 +964,21 @@ def pitch_needing_work(pitches: list[dict]) -> dict | None:
 
 def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref: dict) -> dict | None:
     """
-    Shape targets from the Stuff model, kept inside his pitch's subtype.
+    Shape targets from the Stuff model, kept among MLB pitches like his (similar_pool).
 
-    Each trait (velocity, ride, run, spin) is moved on its own across the range MLB pitches of the
-    same subtype actually cover (10th-90th percentile; velocity only up to +4 mph), with everything
+    Each trait (velocity, ride, run, spin) is moved on its own across the range the MLB pitches most like
+    his actually cover (10th-90th percentile; velocity only up to +4 mph), with everything
     else held where he is. The Stuff+ the model gives at each value shows which changes matter: a
     trait becomes a target only if moving it is worth 3+ Stuff+, and its target range is every
-    value within 2 points of the best one. Traits where he's already near the best stay green.
+    value within 2 points of the best one. Traits where he's already near the best stay green. Ride or
+    run beyond 97% of MLB (either end) isn't targeted: the model has nothing like it to learn from.
     """
     kind, sub = r["shape_family"], r.get("subtype")
     sc = ref["scale"].get(kind)
     if not sc:
         return None
-    pool = mlb_rows[(mlb_rows["shape_family"] == kind)]
-    if isinstance(sub, str) and "subtype" in pool and (pool["subtype"] == sub).sum() >= 40:
-        pool = pool[pool["subtype"] == sub]
+    family = mlb_rows[(mlb_rows["shape_family"] == kind)]
+    pool = similar_pool(r, mlb_rows)
     plus = lambda x: 100 - 10 * (x - sc["stuff_xrv_mean"]) / sc["stuff_xrv_std"]
     base = predict(d3.model_inputs(pd.DataFrame([r])), models)["stuff_xrv"].iloc[0]
     if pd.isna(base):
@@ -939,8 +1003,24 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
             q = pool[main].dropna().quantile([0.1, 0.9]) if main in pool else None
             if q is None or q.isna().any():
                 continue
+            if key in ("ivb", "hb") and main in family:
+                edge = family[main].dropna().quantile([SUPPORT_Q, 1 - SUPPORT_Q])
+                if not edge.iloc[0] <= r[main] <= edge.iloc[1]:
+                    rows.append({"trait": key, "label": label, "unit": unit, "now": round(float(r[main]), 1),
+                                 "lo": None, "hi": None, "gain": 0.0, "best_delta": 0.0, "in_range": True,
+                                 "beyond": "more" if r[main] > edge.iloc[1] else "less",
+                                 "open_hi": False, "open_lo": False})
+                    continue
             lo, hi = float(q.iloc[0] - r[main]), float(q.iloc[1] - r[main])
             lo, hi = min(lo, 0.0), max(hi, 0.0)
+            zone = FB_ZONES.get(sub) if kind == "Four-seam" and sub not in OPEN_TAGS else None
+            if zone is not None and key in ("ivb", "hb"):
+                # stay inside his fastball's zone: ride and run targets don't turn one shape into another
+                z_lo, z_hi = (zone[0], zone[1]) if key == "ivb" else (zone[2], zone[3])
+                if z_lo is not None:
+                    lo = min(max(lo, z_lo - float(r[main])), 0.0)
+                if z_hi is not None:
+                    hi = max(min(hi, z_hi - float(r[main])), 0.0)
             if key == "spin":
                 lo, hi = max(lo, -SPIN_MAX_CHANGE), min(hi, SPIN_MAX_CHANGE)
         deltas = np.arange(np.floor(lo / step) * step, hi + step / 2, step)
@@ -958,7 +1038,20 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
         win = (now + ok.min(), now + ok.max())
         in_range = gain < TARGET_GAIN or ok.min() <= 0 <= ok.max()
         best_delta = float(deltas[int(np.nanargmax(g))])
-        rows.append({"trait": key, "label": label, "unit": unit, "now": round(now, 1),
+        evidence = None
+        if key in ("ivb", "hb", "spin") and not in_range:
+            # Evidence check: among the MLB pitches most like his, did the ones with more of this trait actually
+            # allow fewer runs (actual run values, not the model)? A target only stands when they agree.
+            ev = pool.dropna(subset=[main, "xrv100"]) if "xrv100" in pool else pool.iloc[0:0]
+            if len(ev) >= 20:
+                hi_half, lo_half = ev[ev[main] >= ev[main].median()], ev[ev[main] < ev[main].median()]
+                diff = (np.average(hi_half["xrv100"], weights=hi_half["n"])
+                        - np.average(lo_half["xrv100"], weights=lo_half["n"]))   # > 0: more of it, more runs
+                agrees = (diff < 0) == (best_delta > 0)
+                evidence = {"runs_per_100": round(float(abs(diff)), 2), "agrees": bool(agrees), "n": int(len(ev))}
+                if not agrees:
+                    in_range = True   # the model and the results disagree: no target
+        rows.append({"trait": key, "label": label, "unit": unit, "now": round(now, 1), "evidence": evidence,
                      "lo": round(win[0], 1), "hi": round(win[1], 1), "gain": round(gain, 0),
                      "best_delta": round(best_delta, 1), "in_range": bool(in_range),
                      "open_hi": bool(ok.max() >= deltas.max() - 1e-9 and ok.max() > 0),
@@ -996,6 +1089,8 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
                 "spin": "more spin" if more else "less spin"}[x["trait"]]
 
     def where(x):
+        if x.get("beyond"):
+            return "no target (rare: beyond 97% of MLB)"
         if x["trait"] == "gap":  # velo_diff is negative; talk about it as mph off the fastball
             lo, hi = -x["hi"], -x["lo"]
             if x["open_lo"] and not x["open_hi"]:
@@ -1028,6 +1123,15 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
         g0 = shape_gaps[0]
         parts.append(f"The shape change worth the most is {word(g0)}: about {g0['gain']:+.0f} Stuff+ at "
                      f"{g0['target_text']} (he's at {(f'{g0[chr(110)+chr(111)+chr(119)]:,.0f}' if g0['trait'] == 'spin' else f'{g0[chr(110)+chr(111)+chr(119)]:+.1f}')}).")
+        ev = g0.get("evidence")
+        if ev and ev["agrees"]:
+            up = g0["best_delta"] > 0
+            if g0["trait"] == "hb" and r["hb"] < 0:   # glove-side pitch: a higher number is less sweep
+                trait_phrase = "less sweep" if up else "more sweep"
+            else:
+                trait_phrase = f"{'more' if up else 'less'} {({'ivb': 'ride', 'hb': 'run', 'spin': 'spin'})[g0['trait']]}"
+            parts.append(f"The results back it: of the {ev['n']} MLB {kind.lower()}s most like his, the half with "
+                         f"{trait_phrase} allowed {ev['runs_per_100']:.2f} fewer runs per 100 pitches.")
         if len(shape_gaps) > 1:
             parts.append("After that: " + ", ".join(f"{word(x)} ({x['gain']:+.0f})" for x in shape_gaps[1:]) + ".")
     else:
@@ -1051,8 +1155,13 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
     if not shape_gaps and not velo and not gap:
         parts.append("The work is landing it and finding its count.")
     plan = " ".join(parts)
-    by_sub = isinstance(sub, str) and "subtype" in pool and (pool["subtype"] == sub).sum() >= 40
-    return {"rows": rows, "now_plus": round(now_plus), "pool": f"MLB {sub.lower()}s" if by_sub else f"MLB {kind.lower()}s",
+    rare = [x for x in rows if x.get("beyond")]
+    for x in rare:
+        what = {"ivb": "ride" if r["ivb"] >= 0 else "drop", "hb": "sweep" if r["hb"] < 0 else "run"}[x["trait"]]
+        plan = (plan + " " if plan else "") + (
+            f"Its {what} ({x['now']:+.1f} in) is beyond 97% of MLB {kind.lower()}s, too rare for the data to say "
+            f"whether more or less would help.")
+    return {"rows": rows, "now_plus": round(now_plus), "pool": f"the {len(pool)} MLB {kind.lower()}s most like his",
             "plan": plan}
 
 

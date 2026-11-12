@@ -207,14 +207,25 @@ export default function MethodologyPage() {
             </p>
             <p className="m-0">On top of that, each pitch gets a descriptive subtype from the pitcher's average shape:</p>
             <MiniTable head={["Pitch", "Subtypes", "Rule of thumb"]} rows={[
-              ["Four-seam", "Ride · Flat", "14+ in of IVB is ride"],
+              ["Four-seam", "Ride · Cut-ride · Ride-run · Cut · Run · Deadzone", "14+ in ride: cut-ride under 6 in run, ride 6–12, ride-run over 12. Under 14: cut under 6 in run, run over 14. Deadzone: 10–14 in of both"],
               ["Slider", "Sweeper · Gyro · Traditional", "10+ in glove side is a sweeper; under 5 is gyro"],
               ["Curveball", "Slurve · 12-6 · Standard", "slurve: sweep about equal to drop"],
-              ["Changeup", "Fade · Drop", "4+ in more arm-side run than the fastball is fade"],
+              ["Changeup", "Fade-drop · Fade · Drop · Firm · Standard", "vs his fastball: fade 6+ in more run; drop 9+ in less ride; firm under 6 in less ride"],
             ]} />
             <p className="m-0">
-              Subtypes never change a grade. They decide which pitches a pitch is compared with when PRISM looks up research
-              and targets, so a gyro slider is held to what works for gyro sliders, not sweepers.
+              Four-seams use the standard fastball-shape zones. A shape between zones takes the nearest one (ties go to
+              deadzone). The deadzone, 10 to 14 inches of both ride and run, is where four-seams have nowhere to hide: not
+              enough carry to ride and not enough movement to cut or run. A changeup is defined by how it separates from his own fastball, because that separation is the pitch: 9+
+              inches less ride works whatever the run, 6+ inches more run works and works best with depth, and a changeup
+              with under 6 inches of either sits too close to the fastball. The same 18 inches of run is a fade changeup off
+              a cutting four-seam and an ordinary one off a high-run sinker.
+            </p>
+            <p className="m-0">
+              Subtypes never change a grade. They keep a pitch in its own lane when PRISM looks for targets: a cut fastball
+              is compared with cut fastballs and its targets stay inside the cut zone, because a cutting fastball usually
+              comes from how a pitcher releases the ball, and no target will turn it into a ride-run one. A sweeper is held
+              to sweepers the same way. The weak shapes are the exception: a deadzone four-seam or a firm changeup is
+              compared with every pitch of its kind, so its targets can push it out toward whatever grades better.
             </p>
           </Section>
 
@@ -421,9 +432,13 @@ export default function MethodologyPage() {
           </Section>
 
           <Section id="targets" title="Research targets"
-            short="Targets come from the Stuff model itself: PRISM tries realistic versions of the pitch and shows which changes would grade better."
+            short="Targets come from the Stuff model, checked against what actually happened: PRISM tries realistic versions of the pitch and keeps a change only when MLB pitches like his back it up."
             specs={[
-              ["Range searched", "each trait moved on its own across the 10th–90th percentile of MLB pitches of the same subtype"],
+              ["Compared with", "the 15% of MLB pitcher-season pitch types of the same kind and subtype most like his (60–150): fastballs by ride, run, spin and release height; other pitches by speed gap, ride and run off the fastball, plus the fastball they come off. Deadzone four-seams and firm changeups: all of their kind"],
+              ["Four-seam zones", "ride and run targets stay inside his fastball's zone, except deadzone"],
+              ["Range searched", "each trait moved on its own, both ways, across the 10th–90th percentile of those pitches"],
+              ["Rare shapes", "ride or run beyond 97% of MLB at either end isn't targeted: the model has too little like it to learn from"],
+              ["Evidence check", "a ride, run or spin target stands only if, among those pitches, the half with more (or less) of it actually allowed fewer runs"],
               ["Velocity", "fastball: up only, to +4 mph. Secondaries: this pitch's own speed with the fastball held fixed"],
               ["Spin", "at most ±300 rpm"],
               ["Becomes a target", "worth 5+ Stuff+; the target is every value within 2 points of the best"],
@@ -436,9 +451,16 @@ export default function MethodologyPage() {
               target, and the target range is the window that gets nearly all of the gain. Everything else shows as on target.
             </p>
             <p className="m-0">
-              Because targets are judged within the pitch's subtype, a gyro slider is never told to become a sweeper. For
-              secondary pitches, velocity is shown as a speed range off his current fastball, so it's clear the range rises
-              as the fastball gets harder.
+              "Realistic" means what the MLB pitches most like his actually do, not every pitch with the same label. A
+              changeup with 18 inches of run off a high-run sinker is compared with changeups off high-run fastballs, and
+              searched in both directions. Where a pitch is more extreme than nearly anything in MLB, the model is guessing,
+              so that trait gets no target.
+            </p>
+            <p className="m-0">
+              Every movement and spin target is then checked against real results: among those same MLB pitches, did the
+              ones with more ride (or run, or spin) actually allow fewer runs? If the model and the results disagree, there's
+              no target. The card quotes the result when there is one. For secondary pitches, velocity is shown as a speed
+              range off his current fastball, so it's clear the range rises as the fastball gets harder.
             </p>
           </Section>
 
