@@ -304,7 +304,7 @@ export default function MethodologyPage() {
               ["Location value", "an MLB model (2024–25 Statcast) of the run value at each plate location, by pitch type, count and same- vs opposite-handed hitter; batted balls valued by exit velocity and launch angle"],
               ["Per pitch", "the model's value at his spot minus the average for that pitch type, count and matchup; unknown count or hitter side averaged over how often each happens in MLB"],
               ["Center (100)", "Division III average: Synergy D3 take rates through the MLB take-rate fit, corrected by measured college data (NECBL TrackMan, both teams)"],
-              ["Regression", "his command counts n ÷ (n + 270) from D3 average; each pitch type n ÷ (n + 430) from his command (n = located pitches; measured on MLB)"],
+              ["Regression", "his command counts n ÷ (n + 100) from D3 average (measured on 38 college pitchers); each pitch type n ÷ (n + 430) from his command (MLB). n = located pitches"],
               ["Scale", "10 points = one standard deviation of MLB pitcher-season pitch types (0.0044 runs per pitch)"],
               ["Validation", "on MLB it predicts runs on a pitcher's other pitches (r = 0.10) where the old zone-box score didn't (r = −0.03)"],
             ]}>
@@ -325,8 +325,12 @@ export default function MethodologyPage() {
               with each pitcher's strike rate, against 0.35 for the old version.
             </p>
             <p className="m-0">
-              Location takes a lot of pitches to read, so a small sample leans on the pitcher's overall command, and that
-              command leans on D3 average until he's thrown enough. Both weights come from MLB, the same way as Results.
+              Location takes pitches to read, so a small sample leans on the pitcher's overall command, and that command
+              leans on D3 average until he's thrown enough. How fast it's trusted depends on how different pitchers really
+              are. College command varies about twice as much as MLB command, so a college sample says more: his command
+              is half trusted at 100 located pitches (MLB's spread would need 270). Measured on 38 college pitchers, NECBL
+              (both teams) and Oberlin. Within a pitcher, pitch-type differences in command weren't detectable beyond
+              chance in college data, so each pitch type still leans on his overall command (half at 430 pitches, from MLB).
               Rapsodo and TrackMan are graded the same way: umpire calls on taken pitches put Rapsodo's plate location
               within about an inch of TrackMan's.
             </p>

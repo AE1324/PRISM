@@ -17,8 +17,12 @@ Location+: what a pitch's locations are worth, in runs, judged against Division 
    their take rates implied. So the D3 center is the NECBL measured level moved by the D3 vs NECBL difference
    in take rates (MLB slope): the take-rate estimate for D3 plus the measured college correction.
 
-3. Sample size, measured on MLB like the other grades: a pitcher's command counts n / (n + 270) of the way
-   from D3 average (n = located pitches), and each pitch type n / (n + 430) of the way from his command.
+3. Sample size: a pitcher's command counts n / (n + 100) of the way from D3 average (n = located pitches), and
+   each pitch type n / (n + 430) of the way from his command. The first is measured on college pitchers: true
+   command varies about twice as much between college pitchers as between MLB pitchers (MLB alone gives 270),
+   so a smaller sample says more (NECBL both teams, 20 pitchers: 111; Oberlin, 18: 80). The second is MLB's:
+   in college data, pitch-type differences in command within a pitcher weren't detectable beyond chance
+   (64 pitch types), so there's no evidence to loosen it.
 
 4. Scale: Location+ = 100 - 10 x (estimate - D3 center) / 0.0043, the spread of MLB pitcher-season pitch types.
 
@@ -39,7 +43,7 @@ from prism_data.paths import DATA_DIR, PROCESSED_DIR
 PATH = DATA_DIR / "models" / "location_model.joblib"
 YEARS = (2024, 2025)
 FEATURES = ["x_in", "PlateLocHeight", "Balls", "Strikes", "same", "fam"]
-K_PITCHER = 270
+K_PITCHER = 100   # college-measured (MLB: 270); see note 3
 K_TYPE = 430
 COUNTS = [(b, s) for b in range(4) for s in range(3)]
 TAKE_GROUP = {"Four-seam": "Fastball", "Sinker": "Fastball", "Cutter": "Cutter", "Slider": "Slider",
