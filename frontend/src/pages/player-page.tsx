@@ -73,7 +73,7 @@ export default function PlayerPage() {
               <div className="pr-label" style={{ marginBottom: 8 }}>{r.throws === "L" ? "LHP" : "RHP"} · {staff.team} · {staff.label}</div>
               <h1>{r.pitcher}</h1>
             </div>
-            <div className="pr-meta mono">{r.pitches} pitches · {r.game_pitches} vs hitters · {r.outings} outings</div>
+            <div className="pr-meta mono">{r.pitches} pitches · {r.game_pitches} vs hitters · {r.outings} outings{r.devices?.length ? ` · ${r.devices.map((d) => d.label).join(" + ")}` : ""}</div>
           </div>
           <p className="pr-summary">{r.summary}</p>
 

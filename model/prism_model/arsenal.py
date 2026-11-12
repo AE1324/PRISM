@@ -252,42 +252,65 @@ def regress_location(rows: pd.DataFrame, ref: dict, d3ref: dict | None = None,
     Works in deviations from the average location score for the pitch type: the D3 average when the D3
     reference has it (so Location+ 100 = D3 average, like the other grades), else the MLB average.
 
-    Device calibration. Plate location depends on the tracking system (Rapsodo extrapolates it from early
-    flight and scatters pitches more than TrackMan or Statcast), so the staff's average raw location isn't
-    comparable to MLB-measured references. When D3 strike data is available, the staff's level is set from
-    its strike rate vs D3 by pitch type (strike calls are outcomes, independent of the device), converted to
-    location points with the MLB strike-to-location slope. Location data then only separates pitchers and
-    pitches within the staff, all measured on the same device.
+    The staff's level depends on the device (``rows["device"]``, devices.py), done separately per device:
+    - extrapolated locations (Rapsodo projects them from early flight; they scatter more and aren't comparable
+      to measured references): the level is set from the staff's strike rate vs D3 by pitch type (strike calls
+      are outcomes, independent of the device), converted to location points with the MLB strike-to-location
+      slope. Location data then only separates pitchers and pitches within the staff.
+    - measured locations (TrackMan): the staff's own location level is used, regressed toward average by its
+      sample (n / (n + LOC_K_PITCHER)). Average here is the level's measured average from the same files
+      (both teams, ``level_location``) when there's enough of it, else the D3 estimate.
 
     Regression: pitcher command = staff + n/(n+LOC_K_PITCHER) x (his deviation - staff); pitch type =
     pitcher + n/(n+LOC_K_TYPE) x (its deviation - pitcher).
     """
+    from prism_data.devices import profile
+
     rows = rows.copy()
     rows["location_raw"] = rows["location"]
+    if "device" not in rows:
+        rows["device"] = "unknown"
     mlb_mean = rows["shape_family"].map(lambda f: ref["scale"].get(f, {}).get("location_mean", np.nan))
     lref = (d3ref or {}).get("location") or {}
     center = rows["shape_family"].map(lambda f: lref.get(f, {}).get("d3_location_mean", np.nan)).fillna(mlb_mean)
-    dev = rows["location"] - center
-    n = rows["n_located"].where(dev.notna(), 0).astype(float)
-    if n.sum() == 0:
-        return rows
-    observed = float(np.nansum(dev * n) / n.sum())
-    staff = observed
-    if lref and strikes is not None and len(strikes):
-        st = strikes[strikes["shape_family"].isin(list(lref))]
-        if st["n"].sum() > 0:
-            gap = st.apply(lambda r: lref[r["shape_family"]]["slope"] * (100 * r["strike"] - lref[r["shape_family"]]["d3_strike"]), axis=1)
-            n_st = float(st["n"].sum())
-            # the staff's command level from strikes, regressed toward D3 average by its sample
-            staff = float(np.average(gap, weights=st["n"])) * n_st / (n_st + LOC_K_PITCHER)
-    dev = dev - (observed - staff)   # device offset removed: the staff now sits where its strike-throwing says
-    by_p = pd.DataFrame({"p": rows["PitcherId"], "x": (dev * n).fillna(0), "n": n}).groupby("p")[["x", "n"]].sum()
-    raw_p = (by_p["x"] / by_p["n"].replace(0, np.nan)).fillna(staff)
-    cmd = staff + by_p["n"] / (by_p["n"] + LOC_K_PITCHER) * (raw_p - staff)
-    pc = rows["PitcherId"].map(cmd)
-    # expressed on the MLB location scale so the shared Location+ formula (mean/SD) yields 100 = the center
-    rows["location"] = mlb_mean + pc + n / (n + LOC_K_TYPE) * (dev - pc)
-    rows["location"] = rows["location"].where(dev.notna())
+    # devices that measure location center on the level's measured average when the files carry one
+    measured = rows["device"].map(lambda k: not profile(k).calibrate_location)
+    if "level_location" in rows:
+        center = center.where(~(measured & rows["level_location"].notna()), rows["level_location"])
+        rows["location_center"] = np.where(measured & rows["level_location"].notna(), "level (measured)", "D3 estimate")
+    dev_all = rows["location"] - center
+    n_all = rows["n_located"].where(dev_all.notna(), 0).astype(float)
+    out = pd.Series(np.nan, index=rows.index)
+    rows["location_level"] = None
+    for device, idx in rows.groupby("device").groups.items():
+        dev, n = dev_all[idx], n_all[idx]
+        if n.sum() == 0:
+            continue
+        observed = float(np.nansum(dev * n) / n.sum())
+        staff = observed * n.sum() / (n.sum() + LOC_K_PITCHER)          # measured: its own level, regressed
+        how = "measured"
+        if profile(device).calibrate_location:
+            how = "strike rate"
+            staff = observed                                              # no D3 strike data: leave as observed
+            st = None
+            if strikes is not None and len(strikes):
+                st = strikes[strikes["shape_family"].isin(list(lref))]
+                if "device" in st:
+                    st = st[st["device"] == device]
+            if lref and st is not None and st["n"].sum() > 0:
+                gap = st.apply(lambda r: lref[r["shape_family"]]["slope"] * (100 * r["strike"] - lref[r["shape_family"]]["d3_strike"]), axis=1)
+                n_st = float(st["n"].sum())
+                # the staff's command level from strikes, regressed toward D3 average by its sample
+                staff = float(np.average(gap, weights=st["n"])) * n_st / (n_st + LOC_K_PITCHER)
+        dev = dev - (observed - staff)   # the staff now sits at its level for this device
+        by_p = pd.DataFrame({"p": rows.loc[idx, "PitcherId"], "x": (dev * n).fillna(0), "n": n}).groupby("p")[["x", "n"]].sum()
+        raw_p = (by_p["x"] / by_p["n"].replace(0, np.nan)).fillna(staff)
+        cmd = staff + by_p["n"] / (by_p["n"] + LOC_K_PITCHER) * (raw_p - staff)
+        pc = rows.loc[idx, "PitcherId"].map(cmd)
+        # expressed on the MLB location scale so the shared Location+ formula (mean/SD) yields 100 = the center
+        out[idx] = (mlb_mean[idx] + pc + n / (n + LOC_K_TYPE) * (dev - pc)).where(dev.notna())
+        rows.loc[idx, "location_level"] = how
+    rows["location"] = out
     return rows
 
 
@@ -317,10 +340,19 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
     rows["n_located"] = rows["n_located"].fillna(0).astype(int)
     rows["n_game"] = rows["n_game"].fillna(0).astype(int)
     rows = add_results_tier(rows, df, by)
+    from prism_data.devices import device_of
+
+    dev_col = device_of(df)
+    main_dev = dev_col.groupby([df[c] for c in by]).agg(lambda s: s.mode().iloc[0]).rename("device").reset_index()
+    rows = rows.merge(main_dev, on=by, how="left")
+    rows["device"] = rows["device"].fillna("unknown")
+    if "level_location" in df:   # measured level center from the build (both teams)
+        lvl = df.groupby(by)["level_location"].first().rename("level_location").reset_index()
+        rows = rows.merge(lvl, on=by, how="left")
     strikes = None
     if "strike" in df:
-        g = df[df["strike"].notna()]
-        strikes = g.groupby("shape_family")["strike"].agg(["mean", "size"]).rename(columns={"mean": "strike", "size": "n"}).reset_index()
+        g = df[df["strike"].notna()].assign(device=dev_col)
+        strikes = g.groupby(["device", "shape_family"])["strike"].agg(["mean", "size"]).rename(columns={"mean": "strike", "size": "n"}).reset_index()
     rows = regress_location(rows, ref, d3ref if scale == "d3" else None, strikes)
     rows["usage"] = rows["n"] / rows.groupby("PitcherId")["n"].transform("sum")
 
@@ -1233,6 +1265,9 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
                 continue
             parts = expl.get(idx, {})
             entry["results_weight"] = round(100 * r["n_game"] / (r["n_game"] + r["results_k"]))
+            if isinstance(r.get("location_level"), str):
+                entry["location_basis"] = {"level": r["location_level"],
+                                           "center": r.get("location_center") if isinstance(r.get("location_center"), str) else "D3 estimate"}
             if r.get("results_tier"):
                 entry["results_tier"] = r["results_tier"]
             entry["shape"] = {"velo": _num(r["velo"]), "ivb": _num(r["ivb"]), "hb_arm": _num(r["hb"]),
@@ -1275,8 +1310,12 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
         work = pitch_needing_work(pitches)
         if work is not None:
             work["targets"] = next(e.get("targets") for e in pitches if e["pitch"] == work["pitch"])
+        from prism_data.devices import describe, device_of
+
+        devs = device_of(p).value_counts()
         report = {
             "pitcher": name, "pitcher_id": str(pid), "throws": p["PitcherThrows"].iloc[0],
+            "devices": [dict(describe(k), pitches=int(v)) for k, v in devs.items()],
             "team": p["PitcherTeam"].dropna().iloc[0] if "PitcherTeam" in p and p["PitcherTeam"].notna().any() else None,
             "pitches": int(len(p)), "game_pitches": int(p["is_game"].sum()), "outings": int(p["outing"].nunique()),
             "scale": {"d3": "D3", "mlb": "MLB"}.get(scale, "pitchers in this file"),

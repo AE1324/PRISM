@@ -17,6 +17,7 @@ const STEPS = [
 
 const SECTIONS = [
   { id: "data", title: "Data" },
+  { id: "devices", title: "Devices" },
   { id: "classify", title: "Pitch classification" },
   { id: "stuff", title: "Stuff+ and Shape+" },
   { id: "d3", title: "Calibrating to Division III" },
@@ -159,6 +160,35 @@ export default function MethodologyPage() {
             </p>
           </Section>
 
+          <Section id="devices" title="Devices"
+            short="Rapsodo and TrackMan measure the same pitch in very different ways, so each device has a profile that says how far to trust each kind of number."
+            specs={[
+              ["TrackMan", "radar: measures release, flight, plate location and batted balls. Location used as measured; Results+ can be measured; untagged sessions are games; movement checked per game"],
+              ["Rapsodo", "camera behind the plate: spin read at release, movement from the flight it sees, plate location projected from early flight. Location level set from strike rate; Results+ at best charted; untagged sessions are bullpens"],
+              ["Unknown device", "treated like the least certain one"],
+              ["Known offsets", "recorded with their evidence; only applied once enough pitchers confirm them (none yet)"],
+            ]}>
+            <p className="m-0">
+              TrackMan is a radar in the stands that follows the ball from release to the plate and off the bat. Rapsodo is a
+              camera unit behind the plate that reads spin at release and projects the rest. Both are good at what they're
+              built for, but they don't produce the same kind of number for everything, so PRISM keeps one profile per device
+              and the grades read from it. Adding a device means adding a profile.
+            </p>
+            <p className="m-0">
+              The biggest difference is plate location. TrackMan measures where the ball crosses the plate; Rapsodo projects
+              it from early flight, which scatters pitches more. So a TrackMan staff's Location+ is centered on the measured
+              average of every pitcher in its game files, both teams, while a Rapsodo staff's level comes from its strike rate
+              (see Location+).
+            </p>
+            <p className="m-0">
+              The first side-by-side check, one pitcher on both devices four months apart, agreed closely on spin rate (6 rpm),
+              spin axis (under 1°), extension (0.05 ft) and approach angle at the same plate height (0.2°). Rapsodo read his
+              release point about 2.6 inches lower and 3.6 inches wider; the lower part is likely the indoor mound, the wider
+              part is unexplained so far. Those differences move his fastball's Stuff+ about 2 points, so they're recorded but
+              not applied until more pitchers confirm them.
+            </p>
+          </Section>
+
           <Section id="classify" title="Pitch classification"
             short="Device tags are ignored. Every pitch is classified from its own movement and speed compared to that pitcher's fastball."
             specs={[
@@ -262,8 +292,8 @@ export default function MethodologyPage() {
               ["Competitive zone", "within 1.11 ft of the middle of the plate, 1.17–3.83 ft high"],
               ["Middle", "within 0.56 ft of center, 1.83–3.17 ft high"],
               ["Score", "% in the competitive zone − % in the middle"],
-              ["Center (100)", "D3 average, estimated from Synergy D3 strike rates and the MLB strike-to-location slope by pitch type"],
-              ["Device calibration", "staff level set from its strike rate vs D3 (strike calls don't depend on the tracker); location only separates pitchers and pitches within the staff"],
+              ["Center (100), Rapsodo", "D3 average, estimated from Synergy D3 strike rates and the MLB strike-to-location slope by pitch type; staff level set from its strike rate vs D3"],
+              ["Center (100), TrackMan", "the measured average of every pitcher in the game files, both teams, by pitch type (100+ located pitches; else the D3 estimate); staff level from its own measured locations"],
               ["Regression", "pitcher command → staff at n ÷ (n + 300); each pitch type → his command at n ÷ (n + 400)"],
             ]}>
             <p className="m-0">
@@ -279,6 +309,14 @@ export default function MethodologyPage() {
               the staff's overall level comes from what doesn't depend on the device, its strike rate against D3 averages
               for each pitch type, and location is used to rank pitchers and pitches within the staff. 100 is the Division
               III average, like every other grade.
+            </p>
+            <p className="m-0">
+              TrackMan measures location, so its staff level comes from the locations themselves, and there the strike-rate
+              estimate turned out to be the weak link. NECBL pitchers put about 8 points fewer fastballs in the zone than MLB
+              pitchers yet got the same strike rate as D3, because hitters at this level swing at more of them. Measured
+              against the estimated D3 center, the whole league came out below average. So a TrackMan staff is centered on
+              the measured average of everyone in its game files. For a D3 team with TrackMan at home, that is a measured D3
+              average.
             </p>
           </Section>
 

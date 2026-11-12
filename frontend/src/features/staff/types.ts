@@ -111,8 +111,11 @@ export interface ProgressRow {
   stuff_plus: number | null;
 }
 
+export interface DeviceInfo { key: string; label: string; location: string; release: string; contact: string; best_results_tier: string; pitches: number }
+
 export interface PitcherReport {
   pitcher: string;
+  devices?: DeviceInfo[];
   pitcher_id: string;
   throws: string;
   team?: string | null;

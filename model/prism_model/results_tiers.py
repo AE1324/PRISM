@@ -122,6 +122,9 @@ def classify_contact(df: pd.DataFrame, tiers: dict) -> pd.DataFrame:
     bip = df["PitchCall"].astype(object) == "InPlay"
     la = pd.to_numeric(df["Angle"], errors="coerce") if "Angle" in df else pd.Series(np.nan, index=df.index)
     ev_mlb = pd.to_numeric(df["ExitSpeed_mlb"], errors="coerce") if "ExitSpeed_mlb" in df else pd.Series(np.nan, index=df.index)
+    if "Device" in df or "Source" in df:   # only devices that measure contact can be measured (devices.py)
+        from prism_data.devices import device_of, profile
+        ev_mlb = ev_mlb.where(device_of(df).map(lambda k: profile(k).contact == "measured"))
     m_type = hit_type_from_angle(la)
     m_contact = contact_from_ev(m_type, ev_mlb, tiers)
     measured = bip & m_type.notna() & m_contact.notna()

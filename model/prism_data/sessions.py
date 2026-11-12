@@ -22,10 +22,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from prism_data.devices import profile
+
 DEVICES = ("trackman", "rapsodo")
 SETTINGS = ("game", "live", "bullpen")
 GRADED = ("game", "live")
-DEFAULT_SETTING = {"trackman": "game", "rapsodo": "bullpen"}
 
 
 def _person(name) -> str:
@@ -62,7 +63,7 @@ def tag_sessions(df: pd.DataFrame, sessions: pd.DataFrame | None = None) -> pd.D
     """Add ``Device`` and ``Setting`` to every pitch (see module notes for the rules)."""
     df = df.copy()
     df["Device"] = df["Source"].astype(str).str.lower() if "Source" in df else "rapsodo"
-    df["Setting"] = df["Device"].map(DEFAULT_SETTING).fillna("bullpen")
+    df["Setting"] = df["Device"].map(lambda k: profile(k).default_setting)  # each device's default (devices.py)
     if sessions is None or sessions.empty:
         return df
     day = pd.to_datetime(df["Date"].astype(str), errors="coerce").dt.date
