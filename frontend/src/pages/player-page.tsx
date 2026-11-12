@@ -120,7 +120,8 @@ export default function PlayerPage() {
                     <div className="soft mono" style={{ fontSize: 11.5, margin: "4px 0 6px" }}>{p.usage_pct}% · {num(p.shape?.velo)} mph</div>
                     <Status verdict={p.verdict} />
                   </div>
-                  <div className="pp" style={{ background: bg, color: fg }}>
+                  <div className="pp" style={{ background: bg, color: fg }}
+                    title={p.pitch_plus_gate ? `Pitch+ after ${p.pitch_plus_gate.needed} pitches vs hitters (has ${p.pitch_plus_gate.has})` : undefined}>
                     <span className="k">PITCH+</span>
                     <span className="n">{typeof p.grades.pitch_plus === "number" ? Math.round(p.grades.pitch_plus) : "–"}</span>
                   </div>

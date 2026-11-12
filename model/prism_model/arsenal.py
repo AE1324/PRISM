@@ -50,6 +50,7 @@ from prism_model.stuff import GROUPS, aggregate, predict, to_plus
 REPORTS_DIR = DATA_DIR / "reports"
 
 MIN_TYPE_PITCHES = 10       # a pitch type needs this many to be graded
+MIN_GAME_FOR_PITCH_PLUS = 15  # Pitch+ needs some results: this many pitches vs hitters (game or live sessions)
 MIN_LOCATED = 10            # located pitches needed for a Location grade
 MIN_SESSION_PITCHES = 5     # per outing, for Progress
 MIN_PEERS = 4               # pitch types needed to set a 100 scale
@@ -350,7 +351,7 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
             rows[comp], rows[f"{comp}_basis"], rows[f"{comp}_mean"], rows[f"{comp}_sd"] = r["plus"], r["basis"], r["mean"], r["sd"]
 
     rows["pitch_plus"] = [
-        pitch_plus(s, l, r, g, k) if n >= MIN_TYPE_PITCHES else None
+        pitch_plus(s, l, r, g, k) if n >= MIN_TYPE_PITCHES and g >= MIN_GAME_FOR_PITCH_PLUS else None
         for s, l, r, g, n, k in zip(rows["stuff"], rows["location"], rows["results"], rows["n_game"], rows["n"],
                                     rows["results_k"])
     ]
@@ -1133,7 +1134,7 @@ def _join(words: list[str]) -> str:
 
 def arsenal_plan(pitches: list[dict], work: dict | None) -> str:
     """One sentence, one order of operations (Garnet's arsenal recommendation)."""
-    graded = [p for p in pitches if isinstance(p["grades"]["pitch_plus"], (int, float))]
+    graded = [p for p in pitches if p.get("graded", isinstance(p["grades"]["pitch_plus"], (int, float)))]
     working = [p["pitch"] for p in graded if p.get("verdict") == "Working"]
     struggling = [p["pitch"] for p in graded if p.get("verdict") == "Struggling"]
     no_job = [p["pitch"] for p in graded if p.get("verdict") == "No clear job yet"]
@@ -1144,7 +1145,8 @@ def arsenal_plan(pitches: list[dict], work: dict | None) -> str:
     elif no_job:
         parts.append(f"No new pitch until his {_join(no_job)} {'has' if len(no_job) == 1 else 'have'} a defined job.")
     if working:
-        below = [p for p in graded if p["pitch"] in working and p["grades"]["pitch_plus"] < 100]
+        below = [p for p in graded if p["pitch"] in working and isinstance(p["grades"]["pitch_plus"], (int, float))
+                 and p["grades"]["pitch_plus"] < 100]
         keep = [w for w in working if w not in [p["pitch"] for p in below]]
         if keep:
             parts.append(f"Keep the {_join(keep)} as {'it is' if len(keep) == 1 else 'they are'}.")
@@ -1211,7 +1213,7 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
                 "pitch": kind, "subtype": r["subtype"] if isinstance(r["subtype"], str) else None,
                 "bucket": r["bucket"], "n": int(r["n"]), "game_pitches": int(r["n_game"]), "usage_pct": _pct(r["usage"]),
                 "grades": {
-                    "pitch_plus": _num(r["pitch_plus"], 0) if graded else "N/A",
+                    "pitch_plus": _num(r["pitch_plus"], 0) if graded and pd.notna(r["pitch_plus"]) else "N/A",
                     "stuff_plus": _num(r["stuff"], 0) if pd.notna(r["stuff"]) else "N/A",
                     "shape_plus": _num(r["shape"], 0) if pd.notna(r["shape"]) else "N/A",
                     "location_plus": _num(r["location"], 0) if pd.notna(r["location"]) else "N/A",
@@ -1221,6 +1223,9 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
                                     "all": "all pitches in this file", "mlb": f"MLB {kind.lower()}s"}.get(r["stuff_basis"], "N/A"),
                 },
             }
+            entry["graded"] = bool(graded)
+            if graded and int(r["n_game"]) < MIN_GAME_FOR_PITCH_PLUS:
+                entry["pitch_plus_gate"] = {"needed": MIN_GAME_FOR_PITCH_PLUS, "has": int(r["n_game"])}
             if not graded:
                 entry["verdict"] = "Rarely used"
                 entry["so"] = f"Only {int(r['n'])} thrown; not enough to grade."
@@ -1260,7 +1265,7 @@ def analyze(df: pd.DataFrame, ref: dict, mlb_rows: pd.DataFrame, models: dict | 
         dev = development(p, prow, judged, sit, df, traits)
         throws = p["PitcherThrows"].iloc[0]
         for e in pitches:
-            if not isinstance(e["grades"]["pitch_plus"], (int, float)):
+            if not e["graded"]:
                 continue
             row = prow[prow["shape_family"] == e["pitch"]].iloc[0]
             pp = p[p["shape_family"] == e["pitch"]]

@@ -323,6 +323,7 @@ export default function MethodologyPage() {
               ["Projection", "mean of Stuff+ and Location+"],
               ["Results weight", "n ÷ (n + k), where n is game pitches and k depends on how the balls in play were recorded"],
               ["k", "measured 400 · charted 440 · outcomes only 1,000"],
+              ["Shown when", "15+ pitches vs hitters (game or live sessions); below that the card shows Stuff+, Shape+ and Location+ without a Pitch+"],
               ["How k was measured", "the game pitches at which a pitch type's results predict runs on the rest of his pitches as much as chance moves them (MLB 2024–25 pitcher seasons, split in random halves; charted with 1 in 5 calls one category off)"],
             ]}>
             <Formula>Pitch+ = projection + n ÷ (n + k) × (Results+ − projection)</Formula>
@@ -332,6 +333,10 @@ export default function MethodologyPage() {
               [250, "38%", "20%", "about a full season"],
               [1000, "71%", "50%", "results lead"],
             ]} />
+            <p className="m-0">
+              Pitch+ is only shown once a pitch has some results behind it: 15 pitches against live hitters. Before that
+              there's nothing for the results side to say, and a Pitch+ would just be Stuff and Location under another name.
+            </p>
             <p className="m-0">
               Charted contact sits just under measured, at 440. One in five charted calls being a category off (the rate
               TrackMan operators' hand-tagged hit types disagreed with launch angle) costs surprisingly little. Outcomes alone

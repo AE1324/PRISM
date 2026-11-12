@@ -86,7 +86,8 @@ const RATES: [keyof NonNullable<Pitch["rates"]>, string][] = [
 export function PitchTab({ r, p }: { r: PitcherReport; p: Pitch }) {
   const sh = p.shape, sa = p.spin_axis, g = p.grades;
   const top = r.movement_profile.find((m) => m.pitch === p.pitch)?.max_velo;
-  const graded = typeof g.pitch_plus === "number";
+  const graded = p.graded ?? typeof g.pitch_plus === "number";
+  const gate = p.pitch_plus_gate;
   const pc = { ["--pc" as string]: pitchColor(p.pitch) };
   return (
     <Section idx="01" title={`${p.pitch}${p.subtype ? ` · ${p.subtype}` : ""}`} aside={<Status verdict={p.verdict} />}>
@@ -99,7 +100,8 @@ export function PitchTab({ r, p }: { r: PitcherReport; p: Pitch }) {
                 <thead><tr><th className="c">Pitch+</th><th className="c">Stuff</th><th className="c">Shape</th><th className="c">Loc</th><th className="c">Res</th></tr></thead>
                 <tbody><tr><GradeCell v={g.pitch_plus} /><GradeCell v={g.stuff_plus} /><GradeCell v={g.shape_plus} /><GradeCell v={g.location_plus} /><GradeCell v={g.results_plus} /></tr></tbody>
               </table>
-              {graded && <TierTag tier={p.results_tier} weight={p.results_weight} />}
+              {gate ? <span className="pr-tier outcome" title="Pitch+ needs some results against hitters before it's shown.">Pitch+ after {gate.needed} pitches vs hitters (has {gate.has})</span>
+                : graded && <TierTag tier={p.results_tier} weight={p.results_weight} />}
             </div>
           </div>
 

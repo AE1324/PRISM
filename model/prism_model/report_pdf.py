@@ -374,12 +374,13 @@ def _target_table(t: dict, p: dict) -> str:
     return "".join(H)
 
 
-def _pp_badge(g: dict) -> str:
+def _pp_badge(g: dict, gate: dict | None = None) -> str:
     """Pitch+ in the top right of a pitch card, tinted by tier, with its three inputs underneath."""
     v = g.get("pitch_plus")
     if not isinstance(v, (int, float)):
+        why = (f'<div class="c">after {gate["needed"]} vs hitters (has {gate["has"]})</div>' if gate else "")
         return ('<div class="ppb" style="background:#f3f1f1;color:#888"><div class="l">Pitch+</div>'
-                '<div class="v">N/A</div></div>')
+                f'<div class="v">N/A</div>{why}</div>')
     bg, fg = (("#e3f1e6", "#1f6b35") if v >= 110 else ("#eef4ef", "#2f6b3f") if v >= 100
               else ("#fbeeee", "#9c2a2a") if v < 90 else ("#f8f1ee", "#8a4b3a"))
     parts = [f"{k} {g.get(c)}" for k, c in (("Stuff", "stuff_plus"), ("Loc", "location_plus"), ("Res", "results_plus"))
@@ -401,8 +402,8 @@ def pitch_cards(r: dict) -> str:
                  f'</span>{_e(p["pitch"])}{_e(sub)} <span class="pill {VERDICT_TONE.get(p.get("verdict", ""), "muted")}">'
                  f'{_e(str(p.get("verdict", "")).lower())}</span> <span style="font-weight:400;letter-spacing:0">'
                  f'{p["n"]} thrown, {p["game_pitches"]} vs hitters</span></div>')
-        H.append(_pp_badge(p["grades"]))
-        if not isinstance(p["grades"]["pitch_plus"], (int, float)):
+        H.append(_pp_badge(p["grades"], p.get("pitch_plus_gate")))
+        if not p.get("graded", isinstance(p["grades"]["pitch_plus"], (int, float))):
             H.append(f'<p>{_e(p.get("so", ""))}</p></div>')
             continue
         if sh:

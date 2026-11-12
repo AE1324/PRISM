@@ -247,3 +247,10 @@ def test_location_device_calibration_centers_staff_on_strike_rate():
     dev = out["location"] - 44.0  # deviation on the MLB scale = deviation from the D3 center
     assert abs(np.average(dev, weights=rows["n_located"])) < 0.05  # staff centered at D3 average
     assert dev.iloc[1] > 0 > dev.iloc[0]  # within-staff order kept
+
+
+def test_pitch_plus_needs_15_pitches_vs_hitters():
+    from prism_model.arsenal import MIN_GAME_FOR_PITCH_PLUS, pitch_plus
+    assert MIN_GAME_FOR_PITCH_PLUS == 15
+    # pitch_plus itself still computes; the gate lives in grade_rows / the report entry
+    assert pitch_plus(110, 100, 90, 14) is not None
