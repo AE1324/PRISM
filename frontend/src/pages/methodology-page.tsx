@@ -134,8 +134,12 @@ export default function MethodologyPage() {
             specs={[
               ["Internal format", "TrackMan column names, units and sign conventions; one adapter per source"],
               ["Model training", "MLB Statcast 2022–2025: 2.6M pitches, 1,098 pitchers, 7,517 pitcher-season pitch types"],
-              ["Oberlin data", "Rapsodo (fall intrasquad, live hitters); results matched from AWRE where available"],
+              ["Oberlin data", "Rapsodo (fall 2026 live sessions); results matched from AWRE where available"],
+              ["College TrackMan", "NECBL summer games (both teams): the measured college reference for exit velocity, location and device checks"],
               ["Division III reference", "Synergy team data from 100 D3 programs, spread across team strength"],
+              ["Session tags", "device (TrackMan, Rapsodo) and setting (game, live, bullpen); only game and live are graded"],
+              ["Misread checks", "impossible values; wrong side of the rubber; release 1+ ft from his usual spot; unlike his other pitches of that type; speed 4+ mph off his usual and 2+ mph from every other one"],
+              ["Game checks (TrackMan)", "a game's movement is set aside if over half its pitches have none, or every pitcher's fastball reads 3+ in off his other games"],
               ["Privacy", "Player data never goes to the server or the public repo; staff files load in the browser only"],
             ]}>
             <p className="m-0">
@@ -340,7 +344,6 @@ export default function MethodologyPage() {
               is half trusted at 100 located pitches (MLB's spread would need 270). Measured on 38 college pitchers, NECBL
               (both teams) and Oberlin. Within a pitcher, pitch-type differences in command weren't detectable beyond
               chance in college data, so each pitch type still leans on his overall command (half at 430 pitches, from MLB).
-
             </p>
           </Section>
 
@@ -498,22 +501,29 @@ export default function MethodologyPage() {
             specs={[
               ["Graded pitch type", "10+ pitches"],
               ["Location grade", "10+ located pitches"],
-              ["Verdict", "15+ pitches against hitters"],
+              ["Pitch+ and verdict", "15+ pitches against hitters"],
               ["Outing trends", "5+ of a pitch type in that outing"],
+              ["Location weight", "his command n ÷ (n + 100) from D3 average; each pitch type n ÷ (n + 430) from his command"],
+              ["Results weight in Pitch+", "n ÷ (n + 400) measured · 440 charted · 1,000 outcomes only"],
             ]}>
             <p className="m-0">
               Below these, the page shows N/A or says what's missing. Above them, location and results are still weighed by
-              how much data is behind them, so grades firm up as the season goes on instead of jumping around.
+              how much data is behind them, so grades firm up as the season goes on instead of jumping around. Stuff+ and
+              Shape+ don't need this: a pitch's shape is measured precisely on every throw, so a handful of pitches already
+              describes it well. Location+ is shown already weighed by its sample. Results+ is shown as it happened and
+              weighed only inside Pitch+.
             </p>
           </Section>
 
           <Section id="limits" title="Limits and what's next"
             short="PRISM is honest about what it can't see yet.">
             <ul className="m-0 flex list-disc flex-col gap-2 pl-5 marker:text-[#5F6876]">
-              <li>Shape and location grades are centered on MLB pitch types until enough Division III TrackMan data is available to recenter them.</li>
-              <li>Rapsodo and TrackMan measure slightly differently; known offsets (like approach angle) are corrected, and others will be as data allows.</li>
-              <li>Fall samples are small. The regression built into Location+ and Pitch+ exists for exactly that reason.</li>
-              <li>Next: D3 TrackMan data to recenter shape and location, more team-strength bands for the velocity weight, and secure logins so pages update automatically.</li>
+              <li>The Division III location average is an estimate: Synergy has D3 take rates but no locations, so it's corrected with NECBL TrackMan data. D3 TrackMan games would measure it directly.</li>
+              <li>Rapsodo's 6 inches of plate-location error comes from one comparison (Oberlin vs NECBL at the same strike rate). A same-day session on both devices would pin it down, and would confirm or rule out the movement offsets (less horizontal break, less fastball ride on Rapsodo) that are recorded but not applied.</li>
+              <li>Oberlin's Results+ is outcomes only until batted balls are charted; it counts for less until then.</li>
+              <li>Fall samples are small. Within a pitcher, differences in command between pitch types weren't detectable yet, so each pitch type leans on his overall command.</li>
+              <li>Job rates other than strikes and whiffs are compared with his own staff, because Synergy doesn't have them for D3.</li>
+              <li>Next: a charting tool for live sessions and games, a same-day Rapsodo and TrackMan comparison, D3 TrackMan data, and secure logins so pages update automatically.</li>
             </ul>
           </Section>
         </article>
