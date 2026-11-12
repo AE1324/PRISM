@@ -920,12 +920,17 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
             q = pool[main].dropna().quantile([0.1, 0.9]) if main in pool else None
             if q is None or q.isna().any():
                 continue
-            if key in ("ivb", "hb") and main in family:
-                edge = family[main].dropna().quantile([SUPPORT_Q, 1 - SUPPORT_Q])
-                if not edge.iloc[0] <= r[main] <= edge.iloc[1]:
+            # Rare is judged the way the pitch is: a fastball by its own movement, anything else by its
+            # movement relative to his fastball (a 13 in changeup off a 20 in fastball is an ordinary changeup).
+            rare_col = (cols[1] if key in ("ivb", "hb") and r.get("bucket") != "Fastball"
+                        and pd.notna(r.get(cols[1])) else main)
+            if key in ("ivb", "hb") and rare_col in family:
+                edge = family[rare_col].dropna().quantile([SUPPORT_Q, 1 - SUPPORT_Q])
+                if not edge.iloc[0] <= r[rare_col] <= edge.iloc[1]:
                     rows.append({"trait": key, "label": label, "unit": unit, "now": round(float(r[main]), 1),
                                  "lo": None, "hi": None, "gain": 0.0, "best_delta": 0.0, "in_range": True,
-                                 "beyond": "more" if r[main] > edge.iloc[1] else "less",
+                                 "beyond": "more" if r[rare_col] > edge.iloc[1] else "less",
+                                 "relative": rare_col != main, "rel_now": round(float(r[rare_col]), 1),
                                  "open_hi": False, "open_lo": False})
                     continue
             lo, hi = float(q.iloc[0] - r[main]), float(q.iloc[1] - r[main])
@@ -959,11 +964,16 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
         if key in ("ivb", "hb", "spin") and not in_range:
             # Evidence check: among the MLB pitches most like his, did the ones with more of this trait actually
             # allow fewer runs (actual run values, not the model)? A target only stands when they agree.
-            ev = pool.dropna(subset=[main, "xrv100"]) if "xrv100" in pool else pool.iloc[0:0]
+            # Velocity is held fixed: within a pool, more ride or less drop often just means thrown harder,
+            # and a split by the trait alone would credit the trait for the velocity.
+            ctrl = [c for c in (["velo"] if r.get("bucket") == "Fastball" else ["velo", "velo_diff"]) if c in pool]
+            ev = pool.dropna(subset=[main, "xrv100", *ctrl]) if "xrv100" in pool else pool.iloc[0:0]
             if len(ev) >= 20:
-                hi_half, lo_half = ev[ev[main] >= ev[main].median()], ev[ev[main] < ev[main].median()]
-                diff = (np.average(hi_half["xrv100"], weights=hi_half["n"])
-                        - np.average(lo_half["xrv100"], weights=lo_half["n"]))   # > 0: more of it, more runs
+                w = np.sqrt(ev["n"].astype(float).to_numpy())
+                X = np.column_stack([np.ones(len(ev)), ev[main].astype(float)] + [ev[c].astype(float) for c in ctrl])
+                slope = np.linalg.lstsq(X * w[:, None], ev["xrv100"].astype(float).to_numpy() * w, rcond=None)[0][1]
+                spread = float(ev[main][ev[main] >= ev[main].median()].median() - ev[main][ev[main] < ev[main].median()].median())
+                diff = slope * spread   # > 0: more of it, more runs (upper vs lower half, at the same velocity)
                 agrees = (diff < 0) == (best_delta > 0)
                 evidence = {"runs_per_100": round(float(abs(diff)), 2), "agrees": bool(agrees), "n": int(len(ev))}
                 if not agrees:
@@ -1048,7 +1058,7 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
             else:
                 trait_phrase = f"{'more' if up else 'less'} {({'ivb': 'ride', 'hb': 'run', 'spin': 'spin'})[g0['trait']]}"
             parts.append(f"The results back it: of the {ev['n']} MLB {kind.lower()}s most like his, the half with "
-                         f"{trait_phrase} allowed {ev['runs_per_100']:.2f} fewer runs per 100 pitches.")
+                         f"{trait_phrase} allowed {ev['runs_per_100']:.2f} fewer runs per 100 pitches at the same velocity.")
         if len(shape_gaps) > 1:
             parts.append("After that: " + ", ".join(f"{word(x)} ({x['gain']:+.0f})" for x in shape_gaps[1:]) + ".")
     else:
@@ -1075,6 +1085,13 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
     rare = [x for x in rows if x.get("beyond")]
     for x in rare:
         what = {"ivb": "ride" if r["ivb"] >= 0 else "drop", "hb": "sweep" if r["hb"] < 0 else "run"}[x["trait"]]
+        if x.get("relative"):
+            word_ = "ride" if x["trait"] == "ivb" else "run"
+            amt = (f"{abs(x['rel_now']):.1f} in {'more' if x['rel_now'] > 0 else 'less'} {word_} than his fastball")
+            plan = (plan + " " if plan else "") + (
+                f"Its {'vertical' if x['trait'] == 'ivb' else 'horizontal'} separation ({amt}) is beyond 97% of MLB "
+                f"{kind.lower()}s, too rare for the data to say whether more or less would help.")
+            continue
         plan = (plan + " " if plan else "") + (
             f"Its {what} ({x['now']:+.1f} in) is beyond 97% of MLB {kind.lower()}s, too rare for the data to say "
             f"whether more or less would help.")
