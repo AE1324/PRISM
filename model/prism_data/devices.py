@@ -7,8 +7,8 @@ instead of scattering device rules through the code. A new device is a new profi
 
 What a profile says
   location        measured | projected: how the device gets plate location (TrackMan measures it at the plate;
-                  Rapsodo projects it from early flight). Location+ grades both the same way (location.py):
-                  umpire calls on Oberlin's taken pitches put Rapsodo within about an inch of TrackMan.
+                  Rapsodo projects it from early flight, about 6 in of error per pitch). Location+ holds a
+                  blurred device to the D3 average as it would read through the same blur (location.py).
   release         measured | estimated: how far release height, side and extension can be trusted.
   contact         measured | none: whether the device records exit velocity and launch angle. With none,
                   Results+ can at best be charted (someone recording contact) or outcomes only.
@@ -48,6 +48,7 @@ class DeviceProfile:
     default_setting: str      # game | live | bullpen
     movement_checks: tuple[str, ...]
     offsets: tuple[Offset, ...] = field(default_factory=tuple)
+    location_noise_in: float = 0.0   # plate-location error per pitch (inches); Location+ grades through it
     notes: str = ""
 
     @property
@@ -73,6 +74,12 @@ PROFILES: dict[str, DeviceProfile] = {
     "rapsodo": DeviceProfile(
         key="rapsodo", label="Rapsodo", location="projected", release="estimated", contact="none",
         default_setting="bullpen", movement_checks=("read_gap",),
+        # Plate-location error: Oberlin's Rapsodo locations graded 0.010 runs per pitch worse than NECBL's
+        # TrackMan locations at the same strike rate (58%) and scattered more (four-seam sd 0.98 / 1.04 ft vs
+        # 0.86 / 0.90). Blurring the TrackMan locations by 6 in reproduces both: value +0.0124 vs +0.0121 and
+        # spread 0.99 / 1.03 ft. (Umpire calls on live-BP takes suggested less, but those calls are too fuzzy
+        # to measure it.) Location+ grades Rapsodo pitches through this blur (location.noise_penalty).
+        location_noise_in=6.0,
         offsets=(
             # Two pitchers so far, each months apart on the two devices, so nothing is applied yet.
             # Agreed: fastball spin axis; approach angle at the same plate height (Rapsodo -0.2 / +0.4 deg vs TrackMan,
@@ -82,10 +89,6 @@ PROFILES: dict[str, DeviceProfile] = {
             Offset("horizontal_break", -2.3, "in", False, "Rapsodo reads less horizontal break (toward zero) on every "
                    "pitch compared: Warner fastball -1.2, curveball -3.2; Grayson fastball -3.6 (-0.5 vs his first "
                    "session), slider -1.6, curveball -2.1. The most consistent difference so far. " + _WARNER + " " + _GRAYSON),
-            Offset("PlateLocSide", 0.15, "ft", False, "Plate location from umpire calls on 691 taken Oberlin pitches "
-                   "(fall 2026 lives) vs the college zone fit on NECBL TrackMan: Rapsodo sits about 1.8 in to one side "
-                   "and 0.9 in low, with about 1 in of extra scatter (90% range 0-3.3 in). Too small and too uncertain "
-                   "to apply; the calls come from live-BP umpiring."),
             Offset("InducedVertBreak", -1.6, "in", False, "Fastball ride lower on Rapsodo for both: Warner -1.1, "
                    "Grayson -2.2. Not consistent on breaking balls. " + _WARNER + " " + _GRAYSON),
         ),
@@ -96,7 +99,7 @@ PROFILES: dict[str, DeviceProfile] = {
 
 # Anything unknown is treated as conservatively as the least certain device.
 UNKNOWN = DeviceProfile(key="unknown", label="Unknown device", location="projected", release="estimated",
-                        contact="none", default_setting="bullpen", movement_checks=())
+                        contact="none", default_setting="bullpen", movement_checks=(), location_noise_in=6.0)
 
 
 def profile(key) -> DeviceProfile:

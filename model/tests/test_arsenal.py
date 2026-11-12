@@ -293,3 +293,16 @@ def test_similar_pool_compares_changeups_by_separation_off_a_similar_fastball():
 def test_rare_movement_gets_no_target():
     from prism_model.arsenal import SUPPORT_Q
     assert SUPPORT_Q == 0.03
+
+
+def test_rapsodo_location_is_graded_through_its_blur():
+    """The same measured spots grade higher from a blurred device: its average includes the blur's cost."""
+    import pandas as pd
+    from prism_model import location
+
+    model = dict(_loc_model(), fams=["Four-seam"], noise_penalty={0: {"Four-seam": 0.0}, 6: {"Four-seam": 0.009}})
+    df = pd.DataFrame({"PitcherId": "me", "shape_family": "Four-seam", "loc_value": [0.012] * 200})
+    rows = pd.DataFrame({"PitcherId": ["me"], "shape_family": ["Four-seam"]})
+    tm = location.grade(rows.assign(device="trackman"), df, ["PitcherId", "shape_family"], model)["location_plus"].iloc[0]
+    rap = location.grade(rows.assign(device="rapsodo"), df, ["PitcherId", "shape_family"], model)["location_plus"].iloc[0]
+    assert tm < 100 < rap

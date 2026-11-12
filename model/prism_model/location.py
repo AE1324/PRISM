@@ -26,8 +26,9 @@ Location+: what a pitch's locations are worth, in runs, judged against Division 
 
 4. Scale: Location+ = 100 - 10 x (estimate - D3 center) / 0.0043, the spread of MLB pitcher-season pitch types.
 
-Devices: plate location is graded the same way from TrackMan and Rapsodo. Umpire calls on Oberlin's taken
-pitches put Rapsodo's plate location within about an inch of TrackMan's (devices.py).
+Devices: Rapsodo projects plate location from early flight, with about 6 in of error per pitch (devices.py).
+Blur moves pitches off good spots on average, so a blurred device is held to the D3 average as it would read
+through the same blur (noise_penalty, measured by blurring NECBL TrackMan locations). TrackMan measures location.
 
     python -m prism_model.location build     # trains data/models/location_model.joblib
 """
@@ -77,6 +78,15 @@ def pitch_values(df: pd.DataFrame, model: dict | None = None) -> pd.Series:
     if not ok.any():
         return out
     X = X[ok]
+    full = X["_side_known"] & X["Balls"].notna() & X["Strikes"].notna()
+    if full.any():   # count and hitter side known: one prediction each
+        F = X[full]
+        pred = mdl.predict(F[FEATURES].astype(float))
+        keys = zip(F["fam"].astype(int), F["Balls"].astype(int), F["Strikes"].astype(int), F["same"].astype(int))
+        out.loc[F.index] = pred - np.array([base.get(k, np.nan) for k in keys])
+    X = X[~full]
+    if X.empty:
+        return out
     # unknown hitter side: average over both, mirrored (x is relative to the hitter); unknown count: MLB count mix
     rows, wts, idx = [], [], []
     for i, r in X.iterrows():
@@ -104,9 +114,28 @@ def pitch_values(df: pd.DataFrame, model: dict | None = None) -> pd.Series:
     return out
 
 
-def d3_center(kind: str, model: dict | None = None) -> float:
+def d3_center(kind: str, model: dict | None = None, noise_in: float = 0.0) -> float:
+    """
+    The D3 average location value for a pitch type, as measured by a device with ``noise_in`` inches of plate-
+    location error: blur moves pitches off good spots on average, so the average a blurred device should be
+    held to is the true average plus that cost (measured on MLB pitches, by pitch type).
+    """
     model = model or load()
-    return float(model["d3_center"].get(TAKE_GROUP.get(kind, "Fastball"), model["d3_center"]["Fastball"]))
+    c = float(model["d3_center"].get(TAKE_GROUP.get(kind, "Fastball"), model["d3_center"]["Fastball"]))
+    return c + noise_penalty(kind, noise_in, model)
+
+
+def noise_penalty(kind: str, noise_in: float, model: dict | None = None) -> float:
+    """Average location value lost to ``noise_in`` inches of measurement blur, for this pitch type."""
+    if not noise_in:
+        return 0.0
+    model = model or load()
+    table = model.get("noise_penalty", {})
+    if not table:
+        return 0.0
+    grid = sorted(table)
+    vals = [table[g].get(kind, np.nanmean(list(table[g].values()))) for g in grid]
+    return float(np.interp(noise_in, grid, vals))
 
 
 def grade(rows: pd.DataFrame, df: pd.DataFrame, by: list[str], model: dict | None = None) -> pd.DataFrame:
@@ -123,7 +152,10 @@ def grade(rows: pd.DataFrame, df: pd.DataFrame, by: list[str], model: dict | Non
     agg = d.groupby(by)["_v"].agg(["size", "mean"]).rename(columns={"size": "n_located", "mean": "location_raw"}).reset_index()
     rows = rows.drop(columns=[c for c in ("n_located", "location_raw", "location") if c in rows]).merge(agg, on=by, how="left")
     rows["n_located"] = rows["n_located"].fillna(0).astype(int)
-    center = rows["shape_family"].map(lambda k: d3_center(k, model))
+    from prism_data.devices import profile
+
+    noise = rows["device"].map(lambda k: profile(k).location_noise_in) if "device" in rows else pd.Series(0.0, index=rows.index)
+    center = pd.Series([d3_center(k, model, nz) for k, nz in zip(rows["shape_family"], noise)], index=rows.index)
     dev = rows["location_raw"] - center
     n = rows["n_located"].astype(float).where(dev.notna(), 0.0)
     by_p = pd.DataFrame({"p": rows[by[0]], "x": (dev * n).fillna(0), "n": n}).groupby("p")[["x", "n"]].sum()
@@ -197,8 +229,38 @@ def build(trackman_dir=None) -> dict:
         corr = college["by_group"].get(k, college["pooled"])
         centers[k] = float(b[0] + b[1] * tb + b[2] * ts + corr)
     model.update(d3_center=centers, college=college)
+    model["noise_penalty"] = _noise_penalties(college.pop("pitches_df"), model)
     dump(model, PATH)
     return model
+
+
+NOISE_GRID_IN = (0, 2, 4, 6, 8)
+
+
+def _noise_penalties(college: pd.DataFrame, model: dict, draws: int = 20, seed: int = 0) -> dict:
+    """
+    For each blur level, the average location value lost when college (NECBL TrackMan, both teams) locations are
+    blurred, by pitch group (groups with under 200 pitches use the pooled value). College, not MLB: the D3
+    center is a college level, and blur costs less where pitches are already scattered off the best spots.
+    """
+    rng = np.random.default_rng(seed)
+    cols = ["shape_family", "PitcherThrows", "BatterSide", "Balls", "Strikes", "PlateLocSide", "PlateLocHeight"]
+    smp = college[cols].copy()
+    clean = pitch_values(smp, model)
+    grp = smp["shape_family"].map(TAKE_GROUP)
+    out = {0: {k: 0.0 for k in model["fams"]}}
+    for g in NOISE_GRID_IN[1:]:
+        diffs = []
+        for _ in range(draws):
+            x = smp.copy()
+            x["PlateLocSide"] = x["PlateLocSide"] + rng.normal(0, g / 12, len(x))
+            x["PlateLocHeight"] = x["PlateLocHeight"] + rng.normal(0, g / 12, len(x))
+            diffs.append(pitch_values(x, model) - clean)
+        diff = pd.concat(diffs, axis=1).mean(axis=1)
+        pooled = float(diff.mean())
+        by_grp = {k: float(v.mean()) for k, v in diff.groupby(grp) if len(v) >= COLLEGE_MIN_PITCHES}
+        out[g] = {f: by_grp.get(TAKE_GROUP.get(f), pooled) for f in model["fams"]}
+    return out
 
 
 def _college_correction(model: dict, trackman_dir=None) -> dict:
@@ -224,7 +286,8 @@ def _college_correction(model: dict, trackman_dir=None) -> dict:
         x_all += gap * len(d)
         if len(d) >= COLLEGE_MIN_PITCHES:
             by_group[k] = gap
-    return {"by_group": by_group, "pooled": x_all / n_all if n_all else 0.0, "pitches": int(n_all)}
+    return {"by_group": by_group, "pooled": x_all / n_all if n_all else 0.0, "pitches": int(n_all),
+            "pitches_df": a.dropna(subset=["locv"])}
 
 
 def load() -> dict:

@@ -164,7 +164,7 @@ export default function MethodologyPage() {
             short="Rapsodo and TrackMan measure the same pitch in very different ways, so each device has a profile that says how far to trust each kind of number."
             specs={[
               ["TrackMan", "radar: measures release, flight, plate location and batted balls. Results+ can be measured; untagged sessions are games; movement checked per game"],
-              ["Rapsodo", "camera behind the plate: spin read at release, movement from the flight it sees, plate location projected from early flight (within about an inch of TrackMan). Results+ at best charted; untagged sessions are bullpens"],
+              ["Rapsodo", "camera behind the plate: spin read at release, movement from the flight it sees, plate location projected from early flight (about 6 in of error, built into Location+). Results+ at best charted; untagged sessions are bullpens"],
               ["Unknown device", "treated like the least certain one"],
               ["Known offsets", "recorded with their evidence; only applied once enough pitchers confirm them (none yet)"],
             ]}>
@@ -175,9 +175,9 @@ export default function MethodologyPage() {
               and the grades read from it. Adding a device means adding a profile.
             </p>
             <p className="m-0">
-              Plate location was the biggest worry: TrackMan measures where the ball crosses the plate, while Rapsodo
-              projects it from early flight. Checked against umpire calls on taken pitches, Rapsodo's locations sit within
-              about an inch of TrackMan's, so both are graded the same way (see Location+).
+              Plate location is the biggest difference: TrackMan measures where the ball crosses the plate, while Rapsodo
+              projects it from early flight, with about 6 inches of error per pitch by our comparison. Location+ accounts
+              for that blur rather than ignoring it (see Location+).
             </p>
             <p className="m-0">
               Two pitchers have now been on both devices, each a few months apart: a lefty on one indoor Rapsodo session
@@ -304,6 +304,7 @@ export default function MethodologyPage() {
               ["Location value", "an MLB model (2024–25 Statcast) of the run value at each plate location, by pitch type, count and same- vs opposite-handed hitter; batted balls valued by exit velocity and launch angle"],
               ["Per pitch", "the model's value at his spot minus the average for that pitch type, count and matchup; unknown count or hitter side averaged over how often each happens in MLB"],
               ["Center (100)", "Division III average: Synergy D3 take rates through the MLB take-rate fit, corrected by measured college data (NECBL TrackMan, both teams)"],
+              ["Device", "Rapsodo pitches are held to the D3 average as read through 6 in of plate-location blur (about 0.008–0.010 runs per pitch); TrackMan as measured"],
               ["Regression", "his command counts n ÷ (n + 100) from D3 average (measured on 38 college pitchers); each pitch type n ÷ (n + 430) from his command (MLB). n = located pitches"],
               ["Scale", "10 points = one standard deviation of MLB pitcher-season pitch types (0.0044 runs per pitch)"],
               ["Validation", "on MLB it predicts runs on a pitcher's other pitches (r = 0.10) where the old zone-box score didn't (r = −0.03)"],
@@ -325,14 +326,21 @@ export default function MethodologyPage() {
               with each pitcher's strike rate, against 0.35 for the old version.
             </p>
             <p className="m-0">
+              Rapsodo projects plate location from the first part of the flight, so each pitch carries some error. Compared
+              with NECBL TrackMan at the same strike rate, Oberlin's Rapsodo locations graded about 0.010 runs per pitch
+              worse and scattered more, and adding 6 inches of blur to the TrackMan locations reproduces both. Blur moves
+              pitches off good spots on average, so a Rapsodo pitch is held to the D3 average as it would read through the
+              same 6 inches of blur (measured by blurring college TrackMan locations). Before this, almost no Rapsodo pitch
+              could grade above average no matter where it went.
+            </p>
+            <p className="m-0">
               Location takes pitches to read, so a small sample leans on the pitcher's overall command, and that command
               leans on D3 average until he's thrown enough. How fast it's trusted depends on how different pitchers really
               are. College command varies about twice as much as MLB command, so a college sample says more: his command
               is half trusted at 100 located pitches (MLB's spread would need 270). Measured on 38 college pitchers, NECBL
               (both teams) and Oberlin. Within a pitcher, pitch-type differences in command weren't detectable beyond
               chance in college data, so each pitch type still leans on his overall command (half at 430 pitches, from MLB).
-              Rapsodo and TrackMan are graded the same way: umpire calls on taken pitches put Rapsodo's plate location
-              within about an inch of TrackMan's.
+
             </p>
           </Section>
 
