@@ -181,11 +181,12 @@ export default function MethodologyPage() {
               (see Location+).
             </p>
             <p className="m-0">
-              The first side-by-side check, one pitcher on both devices four months apart, agreed closely on spin rate (6 rpm),
-              spin axis (under 1°), extension (0.05 ft) and approach angle at the same plate height (0.2°). Rapsodo read his
-              release point about 2.6 inches lower and 3.6 inches wider; the lower part is likely the indoor mound, the wider
-              part is unexplained so far. Those differences move his fastball's Stuff+ about 2 points, so they're recorded but
-              not applied until more pitchers confirm them.
+              Two pitchers have now been on both devices, each a few months apart. For both, the devices agreed on fastball
+              spin axis and approach angle. Rapsodo read the fastball about 1.1 inches less ride for both, and put the
+              fastball release about 0.2 ft lower and 0.3–0.4 ft wider. Velocity, spin rate and extension differed in
+              opposite directions for the two, which points to the pitchers changing, not the devices. Applying the
+              consistent fastball offsets would move a Rapsodo fastball's Stuff+ by about 2 points on average but up to 12
+              for some pitchers, so they're recorded, not applied, until a same-day comparison confirms them.
             </p>
           </Section>
 

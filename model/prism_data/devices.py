@@ -60,8 +60,11 @@ class DeviceProfile:
         return "measured" if self.contact == "measured" else "charted"
 
 
-_WARNER = ("Warner Gearhart (LHP), 24 Rapsodo pitches indoors Feb 25 2026 vs 46 TrackMan pitches June 2026 (NECBL). "
-           "One pitcher, four months apart: provisional.")
+_WARNER = ("Warner Gearhart (LHP): 24 Rapsodo pitches, indoor live, Feb 25 2026, vs 46 TrackMan game pitches, "
+           "June 2026 (NECBL).")
+_GRAYSON = ("Grayson Black (RHP): 172 Rapsodo pitches, outdoor lives, Sep-Oct 2026, vs 22 TrackMan bullpen pitches at "
+            "Driveline, Jul 7 2026 (from the session PDF).")
+
 
 PROFILES: dict[str, DeviceProfile] = {
     "trackman": DeviceProfile(
@@ -74,15 +77,20 @@ PROFILES: dict[str, DeviceProfile] = {
         key="rapsodo", label="Rapsodo", location="extrapolated", release="estimated", contact="none",
         default_setting="bullpen", movement_checks=("read_gap",),
         offsets=(
-            # Agreed with TrackMan (fastball): spin rate (-6 rpm), spin axis (+0.9 deg), extension (+0.05 ft),
-            # approach angle at the same plate height (+0.2 deg).
-            Offset("RelHeight", -0.22, "ft", False, _WARNER + " Same on every pitch type, but that session was "
-                   "indoors, where the mound often isn't game height: likely the setting, not the device."),
-            Offset("rel_side_arm", 0.31, "ft", False, _WARNER + " Wider on fastball and curveball (0.29-0.31), "
-                   "less on the changeup (0.10). Not explained by the mound; needs more pitchers."),
-            Offset("RelSpeed", 1.1, "mph", False, _WARNER + " Can't separate from February vs mid-summer velocity."),
-            Offset("InducedVertBreak", -1.1, "in", False, _WARNER + " Fastball; about 2 standard errors."),
-            Offset("hb_arm", -1.2, "in", False, _WARNER + " Fastball; about 2 standard errors."),
+            # Two pitchers so far, each months apart on the two devices, so nothing is applied yet. Fastball readings
+            # that agreed for both: spin axis, approach angle at the same plate height. Readings that disagreed in
+            # direction between the two (so not a device offset): velocity (+1.1 / -0.75 mph), fastball spin rate
+            # (-6 / -82 rpm), extension (+0.05 / +0.61 ft).
+            Offset("InducedVertBreak", -1.1, "in", False, "Fastball reads lower on Rapsodo for both pitchers: "
+                   "Warner -1.1, Grayson -1.1. " + _WARNER + " " + _GRAYSON),
+            Offset("hb_arm", -0.9, "in", False, "Fastball arm-side run lower on Rapsodo for both: Warner -1.2, "
+                   "Grayson -0.5. " + _WARNER + " " + _GRAYSON),
+            Offset("rel_side_arm", 0.37, "ft", False, "Fastball released wider on Rapsodo for both: Warner +0.31, "
+                   "Grayson +0.43. Not consistent on other pitches (Grayson's changeup, curveball and slider read "
+                   "0.1-0.3 ft narrower). " + _WARNER + " " + _GRAYSON),
+            Offset("RelHeight", -0.2, "ft", False, "Fastball released lower on Rapsodo for both: Warner -0.22 "
+                   "(Rapsodo indoors), Grayson -0.19 (Rapsodo outdoors, TrackMan indoors), so the mound doesn't "
+                   "explain it. Grayson's changeup and curveball read 0.17 ft higher. " + _WARNER + " " + _GRAYSON),
         ),
         notes="Camera unit behind the plate: spin is read at release; movement from the flight it sees (with a "
               "spin-based backup); plate location is projected from early flight, so it scatters more.",
