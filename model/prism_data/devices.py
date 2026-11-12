@@ -6,10 +6,9 @@ radar in the stands), so the engine reads how far to trust each kind of number f
 instead of scattering device rules through the code. A new device is a new profile.
 
 What a profile says
-  location        measured | extrapolated. Extrapolated plate locations (Rapsodo projects them from early
-                  flight) scatter more and can sit at a different level, so a staff's Location+ level is set
-                  from its strike rate vs D3 and location only ranks pitchers within the staff. Measured
-                  locations (TrackMan) are used as they are, regressed by sample size.
+  location        measured | projected: how the device gets plate location (TrackMan measures it at the plate;
+                  Rapsodo projects it from early flight). Location+ grades both the same way (location.py):
+                  umpire calls on Oberlin's taken pitches put Rapsodo within about an inch of TrackMan.
   release         measured | estimated: how far release height, side and extension can be trusted.
   contact         measured | none: whether the device records exit velocity and launch angle. With none,
                   Results+ can at best be charted (someone recording contact) or outcomes only.
@@ -52,10 +51,6 @@ class DeviceProfile:
     notes: str = ""
 
     @property
-    def calibrate_location(self) -> bool:
-        return self.location == "extrapolated"
-
-    @property
     def best_results_tier(self) -> str:
         return "measured" if self.contact == "measured" else "charted"
 
@@ -76,7 +71,7 @@ PROFILES: dict[str, DeviceProfile] = {
               "(bullpen) export writes approach angles x 39.37; the reader corrects it.",
     ),
     "rapsodo": DeviceProfile(
-        key="rapsodo", label="Rapsodo", location="extrapolated", release="estimated", contact="none",
+        key="rapsodo", label="Rapsodo", location="projected", release="estimated", contact="none",
         default_setting="bullpen", movement_checks=("read_gap",),
         offsets=(
             # Two pitchers so far, each months apart on the two devices, so nothing is applied yet.
@@ -87,6 +82,10 @@ PROFILES: dict[str, DeviceProfile] = {
             Offset("horizontal_break", -2.3, "in", False, "Rapsodo reads less horizontal break (toward zero) on every "
                    "pitch compared: Warner fastball -1.2, curveball -3.2; Grayson fastball -3.6 (-0.5 vs his first "
                    "session), slider -1.6, curveball -2.1. The most consistent difference so far. " + _WARNER + " " + _GRAYSON),
+            Offset("PlateLocSide", 0.15, "ft", False, "Plate location from umpire calls on 691 taken Oberlin pitches "
+                   "(fall 2026 lives) vs the college zone fit on NECBL TrackMan: Rapsodo sits about 1.8 in to one side "
+                   "and 0.9 in low, with about 1 in of extra scatter (90% range 0-3.3 in). Too small and too uncertain "
+                   "to apply; the calls come from live-BP umpiring."),
             Offset("InducedVertBreak", -1.6, "in", False, "Fastball ride lower on Rapsodo for both: Warner -1.1, "
                    "Grayson -2.2. Not consistent on breaking balls. " + _WARNER + " " + _GRAYSON),
         ),
@@ -96,7 +95,7 @@ PROFILES: dict[str, DeviceProfile] = {
 }
 
 # Anything unknown is treated as conservatively as the least certain device.
-UNKNOWN = DeviceProfile(key="unknown", label="Unknown device", location="extrapolated", release="estimated",
+UNKNOWN = DeviceProfile(key="unknown", label="Unknown device", location="projected", release="estimated",
                         contact="none", default_setting="bullpen", movement_checks=())
 
 

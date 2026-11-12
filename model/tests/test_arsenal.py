@@ -232,21 +232,38 @@ def test_markdown_renders(reports):
     assert "**So:**" in md
 
 
-def test_location_device_calibration_centers_staff_on_strike_rate():
-    """A staff whose strike rate equals D3 average sits at the D3 center, whatever its raw (device) location."""
-    import numpy as np
-    import pandas as pd
-    from prism_model.arsenal import regress_location
+def _loc_model():
+    return {"d3_center": {"Fastball": 0.008, "Slider": 0.009, "Changeup": 0.010, "Curveball": 0.0075, "Cutter": 0.009},
+            "scale_sd": 0.0044}
 
-    ref = {"scale": {"Four-seam": {"location_mean": 44.0, "location_std": 3.3}}}
-    d3ref = {"location": {"Four-seam": {"slope": 0.14, "mlb_strike": 66.0, "d3_strike": 62.0, "d3_location_mean": 43.5}}}
-    rows = pd.DataFrame({"PitcherId": ["a", "b"], "shape_family": ["Four-seam"] * 2,
-                         "location": [36.0, 40.0], "n_located": [400, 400]})  # raw reads ~6 pts low on this device
-    strikes = pd.DataFrame({"shape_family": ["Four-seam"], "strike": [0.62], "n": [800]})
-    out = regress_location(rows, ref, d3ref, strikes)
-    dev = out["location"] - 44.0  # deviation on the MLB scale = deviation from the D3 center
-    assert abs(np.average(dev, weights=rows["n_located"])) < 0.05  # staff centered at D3 average
-    assert dev.iloc[1] > 0 > dev.iloc[0]  # within-staff order kept
+
+def test_location_plus_is_absolute_not_staff_relative():
+    """A pitcher's Location+ depends on his locations vs D3 average, not on how well his teammates locate."""
+    import pandas as pd
+    from prism_model import location
+
+    def staff(teammate_value):
+        df = pd.DataFrame({"PitcherId": ["me"] * 300 + ["mate"] * 300, "shape_family": "Four-seam",
+                           "loc_value": [0.004] * 300 + [teammate_value] * 300})
+        rows = pd.DataFrame({"PitcherId": ["me", "mate"], "shape_family": ["Four-seam"] * 2})
+        out = location.grade(rows, df, ["PitcherId", "shape_family"], _loc_model())
+        return out.set_index("PitcherId")["location_plus"]
+
+    good_staff, bad_staff = staff(0.006), staff(0.030)
+    assert abs(good_staff["me"] - bad_staff["me"]) < 1e-9      # teammates don't move him
+    assert good_staff["me"] > 100 > bad_staff["mate"]            # better than D3 average spots grade above 100
+
+
+def test_location_plus_regresses_small_samples_toward_average():
+    import pandas as pd
+    from prism_model import location
+
+    def plus(n):
+        df = pd.DataFrame({"PitcherId": "me", "shape_family": "Four-seam", "loc_value": [0.0] * n})
+        rows = pd.DataFrame({"PitcherId": ["me"], "shape_family": ["Four-seam"]})
+        return float(location.grade(rows, df, ["PitcherId", "shape_family"], _loc_model())["location_plus"].iloc[0])
+
+    assert 100 < plus(20) < plus(200) < plus(2000)              # same spots: more pitches, more trust
 
 
 def test_pitch_plus_needs_15_pitches_vs_hitters():

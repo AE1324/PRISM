@@ -48,7 +48,7 @@ function Block({ id, eyebrow, title, intro, children }: { id: string; eyebrow: s
 const GRADES = [
   { name: "Stuff+", q: "How good is the pitch itself?", body: "Velocity, movement, spin and release, graded on how many runs pitches built like this one give up. Nothing about where it was thrown or what happened.", from: "Pitch tracking only" },
   { name: "Shape+", q: "How good is the design, ignoring speed?", body: "Stuff+ with velocity taken out. It separates a well-shaped pitch from one that's carried by arm speed, and shows what a pitch could become as velocity comes.", from: "Pitch tracking only" },
-  { name: "Location+", q: "Does he put it where it needs to go?", body: "How often the pitch lands in the competitive zone (the edges and the zone) while staying out of the middle. It's weighed by how much data is behind it.", from: "Plate location" },
+  { name: "Location+", q: "Does he put it where it needs to go?", body: "What his spots are worth in runs for that pitch type and count, from where MLB pitches do damage and where they get hit, judged against the D3 average. It's weighed by how much data is behind it.", from: "Plate location" },
   { name: "Results+", q: "What has it actually done in games?", body: "The run value of every pitch thrown against hitters: balls, strikes, whiffs, and the type and quality of contact when the ball was put in play, judged against that level.", from: "Live at-bats" },
 ];
 
@@ -75,7 +75,7 @@ const DETAILS: Record<string, { desc: string; inputs: string }> = {
   movement: { desc: "How the ball breaks, and for every pitch that isn't a fastball, how far it separates from his own fastball in speed and movement. A changeup is judged on the gap it creates, not on raw break alone.", inputs: "induced vertical break, horizontal break, velo / IVB / HB off the fastball" },
   spin: { desc: "How hard the ball spins and which way. Spin direction is shown as a clock face, and for some pitch types the research shows which direction plays better.", inputs: "spin rate, spin axis" },
   release: { desc: "Where the ball comes out of the hand. For fastballs, release height and width change how the pitch arrives at the plate and how it plays.", inputs: "release height, release side" },
-  command: { desc: "Whether the pitch lands where it needs to. Command is its own grade (Location+), kept separate from the physical traits above so a nasty pitch that isn't commanded yet still shows as nasty.", inputs: "plate location: competitive zone and middle" },
+  command: { desc: "Whether the pitch lands where it needs to. Command is its own grade (Location+), kept separate from the physical traits above so a nasty pitch that isn't commanded yet still shows as nasty.", inputs: "plate location, count, pitch type, hitter side" },
 };
 
 export default function MeasuresPage() {

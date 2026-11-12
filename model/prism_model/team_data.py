@@ -120,27 +120,6 @@ def add_level_exit_velo(df: pd.DataFrame) -> pd.DataFrame:
     return df.assign(ExitSpeed_mlb=results_tiers.level_ev_to_mlb(ev, ev[bip], tiers))
 
 
-LEVEL_MIN_LOCATED = 100   # located pitches of a type needed to set a measured level center
-
-
-def add_level_location(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    ``level_location``: the average location score (competitive% - middle%) of every clean pitch of that type
-    in these files, both teams. For a device that measures plate location this is the level's real average,
-    which Location+ centers on instead of the D3 estimate (D3 has strike rates but no locations, and the MLB
-    strike-to-location conversion overstates where college pitchers locate). Needs 100+ located per type.
-    """
-    from prism_model.references import add_flags
-
-    ok = df["shape_family"].notna() & ~df["exclude"].astype(bool)
-    f = add_flags(df[ok])
-    f = f[f["located"]]
-    by = f.groupby("shape_family").agg(n=("competitive", "size"), comp=("competitive", "mean"), mid=("middle", "mean"))
-    by = by[by["n"] >= LEVEL_MIN_LOCATED]
-    center = (100 * (by["comp"] - by["mid"])).to_dict()
-    return df.assign(level_location=df["shape_family"].map(center))
-
-
 def add_batter_side(df: pd.DataFrame, path: Path) -> pd.DataFrame:
     if not path.exists():
         return df
@@ -190,7 +169,7 @@ def build_trackman(folder: Path, decisions_path: Path | None = None, team: str |
     per pitcher per game (release point checks use each game as its own stint), name the likely pitcher for
     wrong-side pitches, check each game's movement (blanked for games that can't be trusted), classify the
     clean pitches, flag shape outliers, give pitches without movement a type from speed and spin, apply saved
-    review decisions, set the level's exit velocity and location references from both teams, then keep one
+    review decisions, set the level's exit velocity reference from both teams, then keep one
     team's pitchers (``team`` = TrackMan PitcherTeam code). Results come from the
     export itself (count, call, exit velocity, launch angle), so there's no matching step.
     """
@@ -217,7 +196,6 @@ def build_trackman(folder: Path, decisions_path: Path | None = None, team: str |
     df = flag_shapes(df)
     df = type_without_movement(df)
     df = apply_decisions(df, decisions)
-    df = add_level_location(df)   # both teams' measured locations set the level
     if team:  # last: every level reference above reads both teams' pitchers
         df = df[df["PitcherTeam"].astype(str) == team].reset_index(drop=True)
     df = tag_sessions(df, load_sessions(sessions_path))  # TrackMan exports default to game

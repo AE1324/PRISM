@@ -163,8 +163,8 @@ export default function MethodologyPage() {
           <Section id="devices" title="Devices"
             short="Rapsodo and TrackMan measure the same pitch in very different ways, so each device has a profile that says how far to trust each kind of number."
             specs={[
-              ["TrackMan", "radar: measures release, flight, plate location and batted balls. Location used as measured; Results+ can be measured; untagged sessions are games; movement checked per game"],
-              ["Rapsodo", "camera behind the plate: spin read at release, movement from the flight it sees, plate location projected from early flight. Location level set from strike rate; Results+ at best charted; untagged sessions are bullpens"],
+              ["TrackMan", "radar: measures release, flight, plate location and batted balls. Results+ can be measured; untagged sessions are games; movement checked per game"],
+              ["Rapsodo", "camera behind the plate: spin read at release, movement from the flight it sees, plate location projected from early flight (within about an inch of TrackMan). Results+ at best charted; untagged sessions are bullpens"],
               ["Unknown device", "treated like the least certain one"],
               ["Known offsets", "recorded with their evidence; only applied once enough pitchers confirm them (none yet)"],
             ]}>
@@ -175,10 +175,9 @@ export default function MethodologyPage() {
               and the grades read from it. Adding a device means adding a profile.
             </p>
             <p className="m-0">
-              The biggest difference is plate location. TrackMan measures where the ball crosses the plate; Rapsodo projects
-              it from early flight, which scatters pitches more. So a TrackMan staff's Location+ is centered on the measured
-              average of every pitcher in its game files, both teams, while a Rapsodo staff's level comes from its strike rate
-              (see Location+).
+              Plate location was the biggest worry: TrackMan measures where the ball crosses the plate, while Rapsodo
+              projects it from early flight. Checked against umpire calls on taken pitches, Rapsodo's locations sit within
+              about an inch of TrackMan's, so both are graded the same way (see Location+).
             </p>
             <p className="m-0">
               Two pitchers have now been on both devices, each a few months apart: a lefty on one indoor Rapsodo session
@@ -300,36 +299,36 @@ export default function MethodologyPage() {
           </Section>
 
           <Section id="location" title="Location+"
-            short="Location+ measures how often a pitch lands where hitters can't do much with it. Because location takes a lot of pitches to read, a small sample is pulled toward the pitcher's overall command."
+            short="Location+ is what a pitcher's spots are worth in runs, for that pitch type in that count, judged against the Division III average."
             specs={[
-              ["Competitive zone", "within 1.11 ft of the middle of the plate, 1.17–3.83 ft high"],
-              ["Middle", "within 0.56 ft of center, 1.83–3.17 ft high"],
-              ["Score", "% in the competitive zone − % in the middle"],
-              ["Center (100), Rapsodo", "D3 average, estimated from Synergy D3 strike rates and the MLB strike-to-location slope by pitch type; staff level set from its strike rate vs D3"],
-              ["Center (100), TrackMan", "the measured average of every pitcher in the game files, both teams, by pitch type (100+ located pitches; else the D3 estimate); staff level from its own measured locations"],
-              ["Regression", "pitcher command → staff at n ÷ (n + 300); each pitch type → his command at n ÷ (n + 400)"],
+              ["Location value", "an MLB model (2024–25 Statcast) of the run value at each plate location, by pitch type, count and same- vs opposite-handed hitter; batted balls valued by exit velocity and launch angle"],
+              ["Per pitch", "the model's value at his spot minus the average for that pitch type, count and matchup; unknown count or hitter side averaged over how often each happens in MLB"],
+              ["Center (100)", "Division III average: Synergy D3 take rates through the MLB take-rate fit, corrected by measured college data (NECBL TrackMan, both teams)"],
+              ["Regression", "his command counts n ÷ (n + 270) from D3 average; each pitch type n ÷ (n + 430) from his command (n = located pitches; measured on MLB)"],
+              ["Scale", "10 points = one standard deviation of MLB pitcher-season pitch types (0.0044 runs per pitch)"],
+              ["Validation", "on MLB it predicts runs on a pitcher's other pitches (r = 0.10) where the old zone-box score didn't (r = −0.03)"],
             ]}>
             <p className="m-0">
-              On Oberlin's fall data, the spread in location from one pitch type to another was 8.6 points, and 8.2 of that is
-              what chance alone produces in 20 to 40 pitches. So a 17-pitch slider that happened to land well can't be graded
-              like an elite command pitch. PRISM regresses in two steps: first each pitcher's overall command toward the
-              staff, then each pitch type toward his own command. As pitches pile up, each pitch's own location takes over.
+              Where a pitch should go depends on what it is and the count. A slider buried low and away with two strikes is
+              worth a lot, while the same spot on a 3-1 fastball is a walk risk. So instead of two fixed boxes, every
+              location is valued by what actually happens there in MLB for that pitch type, in that count, against a
+              same- or opposite-handed hitter. A pitch earns credit for how much its spot helped compared to an average
+              spot for the same situation, so a pitcher isn't rewarded or punished for the counts he happened to be in.
             </p>
             <p className="m-0">
-              Plate location also depends on the tracker. Rapsodo estimates it from the first part of the ball's flight, so
-              it scatters pitches more than TrackMan does and puts fewer of them in the competitive zone on paper. Left
-              alone, that made a staff that throws strikes at the Division III average look like below-average command. So
-              the staff's overall level comes from what doesn't depend on the device, its strike rate against D3 averages
-              for each pitch type, and location is used to rank pitchers and pitches within the staff. 100 is the Division
-              III average, like every other grade.
+              100 is the Division III average, a fixed standard, not the rest of the staff, so a staff that struggles to
+              command the ball doesn't grade itself up. Synergy has D3 take rates but no locations. In MLB, a pitch type's
+              taken-ball rate tracks its location value well, but college hitters chase more, which makes take rates
+              flatter college command. The NECBL TrackMan games show how much: both teams' measured locations were worth
+              about 0.007 runs per pitch more than their take rates implied. The D3 average uses that measured
+              correction. As a check, Location+ follows real strike-throwing: on both staffs it correlates 0.63 to 0.72
+              with each pitcher's strike rate, against 0.35 for the old version.
             </p>
             <p className="m-0">
-              TrackMan measures location, so its staff level comes from the locations themselves, and there the strike-rate
-              estimate turned out to be the weak link. NECBL pitchers put about 8 points fewer fastballs in the zone than MLB
-              pitchers yet got the same strike rate as D3, because hitters at this level swing at more of them. Measured
-              against the estimated D3 center, the whole league came out below average. So a TrackMan staff is centered on
-              the measured average of everyone in its game files. For a D3 team with TrackMan at home, that is a measured D3
-              average.
+              Location takes a lot of pitches to read, so a small sample leans on the pitcher's overall command, and that
+              command leans on D3 average until he's thrown enough. Both weights come from MLB, the same way as Results.
+              Rapsodo and TrackMan are graded the same way: umpire calls on taken pitches put Rapsodo's plate location
+              within about an inch of TrackMan's.
             </p>
           </Section>
 
