@@ -181,12 +181,13 @@ export default function MethodologyPage() {
               (see Location+).
             </p>
             <p className="m-0">
-              Two pitchers have now been on both devices, each a few months apart. For both, the devices agreed on fastball
-              spin axis and approach angle. Rapsodo read the fastball about 1.1 inches less ride for both, and put the
-              fastball release about 0.2 ft lower and 0.3–0.4 ft wider. Velocity, spin rate and extension differed in
-              opposite directions for the two, which points to the pitchers changing, not the devices. Applying the
-              consistent fastball offsets would move a Rapsodo fastball's Stuff+ by about 2 points on average but up to 12
-              for some pitchers, so they're recorded, not applied, until a same-day comparison confirms them.
+              Two pitchers have now been on both devices, each a few months apart: a lefty on one indoor Rapsodo session
+              against TrackMan games, and a righty on fall Rapsodo lives against three TrackMan bullpens. The clearest
+              pattern: Rapsodo read less horizontal break on every pitch compared, by 1 to 3.5 inches, and less fastball
+              ride for both (1 and 2 inches). Spin axis and approach angle agreed. Velocity, spin rate, extension and
+              release point differed in opposite directions for the two, which points to the pitchers, not the devices.
+              The righty also changed his own fastball run by almost 4 inches between two TrackMan sessions, so the
+              offsets stay recorded, not applied, until a same-day comparison confirms them.
             </p>
           </Section>
 

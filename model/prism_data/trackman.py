@@ -96,9 +96,16 @@ def read_trackman(path: str | Path) -> pd.DataFrame:
     df["Date"] = dates.dt.date
     df["Season"] = dates.dt.year.astype("Int64")
     if "GameID" not in df:
-        team = df["PitcherTeam"].astype(str) if "PitcherTeam" in df else ""
+        team = df["PitcherTeam"].fillna("").astype(str) if "PitcherTeam" in df else ""   # practice exports: no team
         df["GameID"] = dates.dt.strftime("%Y%m%d").fillna("unknown") + "-" + team
 
+    # TrackMan's practice (bullpen) export writes approach angles multiplied by 39.37 (a meters-to-inches
+    # conversion applied to an angle): a fastball's VAA reads -200 instead of -5. Real VAAs never pass 20 deg.
+    for col in ("VertApprAngle", "HorzApprAngle"):
+        if col in df:
+            v = pd.to_numeric(df[col], errors="coerce")
+            if v.abs().median() > 20:
+                df[col] = v / 39.37
     if "PitchCall" in df:
         df["PitchCall"] = df["PitchCall"].map(PITCH_CALL)
     for col in ["Balls", "Strikes", "PitchNo"]:

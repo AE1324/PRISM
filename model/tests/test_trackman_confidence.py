@@ -36,3 +36,15 @@ def test_wrong_side_pitch_names_the_pitcher_whose_release_matches():
                      issues=["released from the wrong side for a RHP (-1.2 ft)"]))
     out = attribute_wrong_pitcher(pd.DataFrame(rows))
     assert any("likely thrown by Lefty" in x for x in out.iloc[-1]["issues"])
+
+
+def test_practice_export_approach_angles_are_rescaled(tmp_path):
+    import pandas as pd
+    from prism_data.trackman import read_trackman
+    p = tmp_path / "practice.csv"
+    pd.DataFrame({"PitchNo": [1, 2], "Date": "2026-07-31", "Pitcher": "Black, Grayson", "PitcherId": 117036,
+                  "PitcherThrows": "Right", "RelSpeed": [88.6, 77.9], "VertApprAngle": [-198.29, -313.6],
+                  "HorzApprAngle": [19.13, -223.26], "HorzBreak": [16.2, -17.7], "RelSide": [1.5, 2.2],
+                  "InducedVertBreak": [20.9, 2.8]}).to_csv(p, index=False)
+    df = read_trackman(p)
+    assert abs(df["VertApprAngle"].iloc[0] + 5.04) < 0.01 and abs(df["HorzApprAngle"].iloc[1] + 5.67) < 0.01

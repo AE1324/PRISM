@@ -62,8 +62,9 @@ class DeviceProfile:
 
 _WARNER = ("Warner Gearhart (LHP): 24 Rapsodo pitches, indoor live, Feb 25 2026, vs 46 TrackMan game pitches, "
            "June 2026 (NECBL).")
-_GRAYSON = ("Grayson Black (RHP): 172 Rapsodo pitches, outdoor lives, Sep-Oct 2026, vs 22 TrackMan bullpen pitches at "
-            "Driveline, Jul 7 2026 (from the session PDF).")
+_GRAYSON = ("Grayson Black (RHP): 172 Rapsodo pitches, outdoor lives, Sep-Oct 2026, vs 75 TrackMan bullpen pitches at "
+            "Driveline over three sessions, Jul 7 - Aug 7 2026. He changed a lot between those sessions (fastball run "
+            "12.1 -> 15.9 in, curveball spin 2219 -> 2437 rpm), so only gaps bigger than his own drift mean much.")
 
 
 PROFILES: dict[str, DeviceProfile] = {
@@ -71,26 +72,23 @@ PROFILES: dict[str, DeviceProfile] = {
         key="trackman", label="TrackMan", location="measured", release="measured", contact="measured",
         default_setting="game", movement_checks=("low_confidence", "game_calibration"),
         notes="Reference device: radar measures release, flight, plate location and batted balls directly. "
-              "Calibration is set per game, so a bad day shifts every pitcher's movement the same way.",
+              "Calibration is set per game, so a bad day shifts every pitcher's movement the same way. Its practice "
+              "(bullpen) export writes approach angles x 39.37; the reader corrects it.",
     ),
     "rapsodo": DeviceProfile(
         key="rapsodo", label="Rapsodo", location="extrapolated", release="estimated", contact="none",
         default_setting="bullpen", movement_checks=("read_gap",),
         offsets=(
-            # Two pitchers so far, each months apart on the two devices, so nothing is applied yet. Fastball readings
-            # that agreed for both: spin axis, approach angle at the same plate height. Readings that disagreed in
-            # direction between the two (so not a device offset): velocity (+1.1 / -0.75 mph), fastball spin rate
-            # (-6 / -82 rpm), extension (+0.05 / +0.61 ft).
-            Offset("InducedVertBreak", -1.1, "in", False, "Fastball reads lower on Rapsodo for both pitchers: "
-                   "Warner -1.1, Grayson -1.1. " + _WARNER + " " + _GRAYSON),
-            Offset("hb_arm", -0.9, "in", False, "Fastball arm-side run lower on Rapsodo for both: Warner -1.2, "
-                   "Grayson -0.5. " + _WARNER + " " + _GRAYSON),
-            Offset("rel_side_arm", 0.37, "ft", False, "Fastball released wider on Rapsodo for both: Warner +0.31, "
-                   "Grayson +0.43. Not consistent on other pitches (Grayson's changeup, curveball and slider read "
-                   "0.1-0.3 ft narrower). " + _WARNER + " " + _GRAYSON),
-            Offset("RelHeight", -0.2, "ft", False, "Fastball released lower on Rapsodo for both: Warner -0.22 "
-                   "(Rapsodo indoors), Grayson -0.19 (Rapsodo outdoors, TrackMan indoors), so the mound doesn't "
-                   "explain it. Grayson's changeup and curveball read 0.17 ft higher. " + _WARNER + " " + _GRAYSON),
+            # Two pitchers so far, each months apart on the two devices, so nothing is applied yet.
+            # Agreed: fastball spin axis; approach angle at the same plate height (Rapsodo -0.2 / +0.4 deg vs TrackMan,
+            # opposite directions). Differed in direction between the two, so not device offsets: velocity
+            # (+1.1 / -0.5 mph), fastball spin rate (-6 / -94 rpm), extension (+0.05 / +0.6-0.9 ft), release height
+            # (-0.22 / -0.01 ft) and release side (+0.31 / +0.08 ft wider).
+            Offset("horizontal_break", -2.3, "in", False, "Rapsodo reads less horizontal break (toward zero) on every "
+                   "pitch compared: Warner fastball -1.2, curveball -3.2; Grayson fastball -3.6 (-0.5 vs his first "
+                   "session), slider -1.6, curveball -2.1. The most consistent difference so far. " + _WARNER + " " + _GRAYSON),
+            Offset("InducedVertBreak", -1.6, "in", False, "Fastball ride lower on Rapsodo for both: Warner -1.1, "
+                   "Grayson -2.2. Not consistent on breaking balls. " + _WARNER + " " + _GRAYSON),
         ),
         notes="Camera unit behind the plate: spin is read at release; movement from the flight it sees (with a "
               "spin-based backup); plate location is projected from early flight, so it scatters more.",
