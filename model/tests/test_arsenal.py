@@ -306,3 +306,24 @@ def test_rapsodo_location_is_graded_through_its_blur():
     tm = location.grade(rows.assign(device="trackman"), df, ["PitcherId", "shape_family"], model)["location_plus"].iloc[0]
     rap = location.grade(rows.assign(device="rapsodo"), df, ["PitcherId", "shape_family"], model)["location_plus"].iloc[0]
     assert tm < 100 < rap
+
+
+def test_grid_cells_match_synergy_layout():
+    from prism_model import location as L
+    side = [0.0, -0.5, 0.95, -2.0, 0.0, 2.0, 0.0]
+    height = [2.5, 3.3, 2.5, 5.0, 0.5, 0.5, 3.6]
+    # middle-middle, zone top-left, ring right-middle, far up-left, far below, far down-right, ring top-middle
+    assert list(L.grid_cells(side, height)) == [12, 6, 14, 25, 31, 32, 2]
+
+
+def test_grid_estimate_reads_the_ladder_and_takes_off_charting_noise():
+    from prism_model import location as L
+    cell_value = np.zeros(33)
+    cell_value[25:] = 0.03
+    ladder = {"Fastball": {"cell_value": cell_value, "inches": [0, 4, 8], "cell": [0.0, 0.006, 0.012], "truth": [0.0, 0.008, 0.02]}}
+    counts = np.zeros(33)
+    counts[12], counts[25] = 80, 20        # cell-based value 0.006 -> the 4 in step
+    raw = L.grid_estimate(counts, "Fastball", ladder, charting_in=0.0)
+    assert abs(raw["cell"] - 0.006) < 1e-12 and abs(raw["charted_in"] - 4) < 1e-9 and abs(raw["value"] - 0.008) < 1e-9
+    less = L.grid_estimate(counts, "Fastball", ladder, charting_in=2.0)
+    assert abs(less["scatter_in"] - np.sqrt(12)) < 1e-9 and less["value"] < raw["value"]

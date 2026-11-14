@@ -135,7 +135,7 @@ export default function MethodologyPage() {
               ["Internal format", "TrackMan column names, units and sign conventions; one adapter per source"],
               ["Model training", "MLB Statcast 2022–2025: 2.6M pitches, 1,098 pitchers, 7,517 pitcher-season pitch types"],
               ["Oberlin data", "Rapsodo (fall 2026 live sessions); results matched from AWRE where available"],
-              ["College TrackMan", "NECBL summer games (both teams): the measured college reference for exit velocity, location and device checks"],
+              ["College TrackMan", "NECBL summer games (both teams): the measured college reference for exit velocity and device checks, and a check (not an input) on the D3 location average"],
               ["Division III reference", "Synergy team data from 100 D3 programs, spread across team strength"],
               ["Session tags", "device (TrackMan, Rapsodo) and setting (game, live, bullpen); only game and live are graded"],
               ["Misread checks", "impossible values; wrong side of the rubber; release 1+ ft from his usual spot; unlike his other pitches of that type; speed 4+ mph off his usual and 2+ mph from every other one"],
@@ -279,7 +279,7 @@ export default function MethodologyPage() {
               ["Translation", "his fastball's D3 percentile → the MLB speed at that percentile; the ratio between the two is his arm-speed factor"],
               ["Scaled by that factor", "velocity of every pitch, spin rate (spin per mph unchanged), separation off the fastball (same % off)"],
               ["Left as thrown", "movement (with spin scaled to speed, break stays about the same), release point, extension"],
-              ["Velocity weight", "2.0× on fastball velocity: whiffs climb faster with velocity in D3 than in MLB (capped at 2)"],
+              ["Velocity weight", "fastball 1.15× · slider 1.5× · curveball 1.2× · changeup 1.0×: how much more a mph is worth in D3 than in MLB, in whiffs and wOBA, from velocity bands on 14 D3 staffs"],
               ["Rate references", "strike% and whiff% by pitch type from Synergy D3, reweighted by team strength"],
             ]}>
             <p className="m-0">
@@ -297,8 +297,12 @@ export default function MethodologyPage() {
               pitcher's page is still what he actually threw; only the model's view of the pitch is translated.
             </p>
             <p className="m-0">
-              The D3 data also showed that velocity matters more at this level than in MLB: the jump in swing-and-miss rate
-              from a slower fastball to a faster one is about twice as steep. PRISM weights fastball velocity accordingly.
+              Velocity also matters a little more at this level than in MLB. For each pitch type, PRISM compares what one
+              more mph is worth in D3 (Synergy results by velocity band, inside 14 staffs) and in MLB, in whiffs and in
+              wOBA, and multiplies the velocity part of Stuff+ by the ratio: 1.15 for fastballs, 1.2 for curveballs, no
+              change for changeups. Sliders measured 2.4, but Synergy can't tell a gyro slider from a sweeper, and in MLB
+              mixing the two hides most of velocity's effect, so the slider weight is held to 1.5. An earlier version used
+              2.0 on fastballs from three staffs; the larger sample didn't support it.
             </p>
           </Section>
 
@@ -307,9 +311,9 @@ export default function MethodologyPage() {
             specs={[
               ["Location value", "an MLB model (2024–25 Statcast) of the run value at each plate location, by pitch type, count and same- vs opposite-handed hitter; batted balls valued by exit velocity and launch angle"],
               ["Per pitch", "the model's value at his spot minus the average for that pitch type, count and matchup; unknown count or hitter side averaged over how often each happens in MLB"],
-              ["Center (100)", "Division III average: Synergy D3 take rates through the MLB take-rate fit, corrected by measured college data (NECBL TrackMan, both teams)"],
-              ["Device", "Rapsodo pitches are held to the D3 average as read through 6 in of plate-location blur (about 0.008–0.010 runs per pitch); TrackMan as measured"],
-              ["Regression", "his command counts n ÷ (n + 100) from D3 average (measured on 38 college pitchers); each pitch type n ÷ (n + 430) from his command (MLB). n = located pitches"],
+              ["Center (100)", "Division III average from Synergy pitch-location grids (about 24,000 D3 pitches), corrected for misses landing farther out than a grid cell shows, 2 in of charting error, and the sampled staffs' strike rates"],
+              ["Device", "Rapsodo pitches are held to the D3 average as read through 6 in of plate-location blur (about 0.006–0.010 runs per pitch); TrackMan as measured"],
+              ["Regression", "his command counts n ÷ (n + 150) from D3 average (measured on 39 D3 pitchers); each pitch type n ÷ (n + 430) from his command (MLB). n = located pitches"],
               ["Scale", "10 points = one standard deviation of MLB pitcher-season pitch types (0.0044 runs per pitch)"],
               ["Validation", "on MLB it predicts runs on a pitcher's other pitches (r = 0.10) where the old zone-box score didn't (r = −0.03)"],
             ]}>
@@ -322,11 +326,14 @@ export default function MethodologyPage() {
             </p>
             <p className="m-0">
               100 is the Division III average, a fixed standard, not the rest of the staff, so a staff that struggles to
-              command the ball doesn't grade itself up. Synergy has D3 take rates but no locations. In MLB, a pitch type's
-              taken-ball rate tracks its location value well, but college hitters chase more, which makes take rates
-              flatter college command. The NECBL TrackMan games show how much: both teams' measured locations were worth
-              about 0.007 runs per pitch more than their take rates implied. The D3 average uses that measured
-              correction. As a check, Location+ follows real strike-throwing: on both staffs it correlates 0.63 to 0.72
+              command the ball doesn't grade itself up. Synergy charts where every D3 pitch crosses the plate on a
+              33-cell grid, and PRISM values each cell by what MLB pitches there are worth. That alone flatters D3
+              command, because a D3 miss lands farther off the plate than an MLB miss in the same cell. To correct it,
+              MLB pitches are scattered by a few extra inches at a time until their grid matches D3's, and the D3
+              average is what those scattered pitches are truly worth. On NECBL TrackMan games, where exact locations
+              are known, this recovered the measured value for fastballs, sliders and changeups. Two inches are taken
+              off for Synergy's by-eye charting. That part is an assumption: the measured games and Oberlin's own
+              strike rates both point to a fastball average near this one or slightly stricter. As a check, Location+ follows real strike-throwing: on both staffs it correlates 0.63 to 0.72
               with each pitcher's strike rate, against 0.35 for the old version.
             </p>
             <p className="m-0">
@@ -334,15 +341,15 @@ export default function MethodologyPage() {
               with NECBL TrackMan at the same strike rate, Oberlin's Rapsodo locations graded about 0.010 runs per pitch
               worse and scattered more, and adding 6 inches of blur to the TrackMan locations reproduces both. Blur moves
               pitches off good spots on average, so a Rapsodo pitch is held to the D3 average as it would read through the
-              same 6 inches of blur (measured by blurring college TrackMan locations). Before this, almost no Rapsodo pitch
+              same 6 inches of blur (D3's own scatter plus the device's). Before this, almost no Rapsodo pitch
               could grade above average no matter where it went.
             </p>
             <p className="m-0">
               Location takes pitches to read, so a small sample leans on the pitcher's overall command, and that command
               leans on D3 average until he's thrown enough. How fast it's trusted depends on how different pitchers really
-              are. College command varies about twice as much as MLB command, so a college sample says more: his command
-              is half trusted at 100 located pitches (MLB's spread would need 270). Measured on 38 college pitchers, NECBL
-              (both teams) and Oberlin. Within a pitcher, pitch-type differences in command weren't detectable beyond
+              are. D3 command varies about one and a half times as much as MLB command, so a D3 sample says more: his
+              command is half trusted at 150 located pitches (MLB's spread would need 220 to 270). Measured on Synergy
+              fastball grids for 39 pitchers on five D3 staffs. Within a pitcher, pitch-type differences in command weren't detectable beyond
               chance in college data, so each pitch type still leans on his overall command (half at 430 pitches, from MLB).
             </p>
           </Section>
@@ -503,7 +510,7 @@ export default function MethodologyPage() {
               ["Location grade", "10+ located pitches"],
               ["Pitch+ and verdict", "15+ pitches against hitters"],
               ["Outing trends", "5+ of a pitch type in that outing"],
-              ["Location weight", "his command n ÷ (n + 100) from D3 average; each pitch type n ÷ (n + 430) from his command"],
+              ["Location weight", "his command n ÷ (n + 150) from D3 average; each pitch type n ÷ (n + 430) from his command"],
               ["Results weight in Pitch+", "n ÷ (n + 400) measured · 440 charted · 1,000 outcomes only"],
             ]}>
             <p className="m-0">
@@ -518,7 +525,7 @@ export default function MethodologyPage() {
           <Section id="limits" title="Limits and what's next"
             short="PRISM is honest about what it can't see yet.">
             <ul className="m-0 flex list-disc flex-col gap-2 pl-5 marker:text-[#5F6876]">
-              <li>The Division III location average is an estimate: Synergy has D3 take rates but no locations, so it's corrected with NECBL TrackMan data. D3 TrackMan games would measure it directly.</li>
+              <li>The Division III location average rests on Synergy's charted locations and an assumed 2 inches of charting error; without that assumption the fastball average would be about 3 Location+ points more forgiving, with 3 inches about 3 points stricter. D3 TrackMan games would measure it directly.</li>
               <li>Rapsodo's 6 inches of plate-location error comes from one comparison (Oberlin vs NECBL at the same strike rate). A same-day session on both devices would pin it down, and would confirm or rule out the movement offsets (less horizontal break, less fastball ride on Rapsodo) that are recorded but not applied.</li>
               <li>Oberlin's Results+ is outcomes only until batted balls are charted; it counts for less until then.</li>
               <li>Fall samples are small. Within a pitcher, differences in command between pitch types weren't detectable yet, so each pitch type leans on his overall command.</li>
