@@ -216,8 +216,46 @@ def train(years: list[int]) -> dict:
 # --------------------------------------------------------------------------
 # Grading
 # --------------------------------------------------------------------------
+# Smoothing. A boosted-tree model is a staircase: a pitch whose averages move by a sampling-sized amount
+# (a few tenths of a mph, half an inch, 20 rpm) can step across a split and move several Stuff+ points
+# (out of fold on MLB: 3.3 points typical, 7.4 at the 95th percentile). So every prediction is the
+# average over a small cloud of nearby pitches, the same cloud for every pitch. That halved the jumps
+# (1.7 typical, 3.6 at the 95th) and predicted next-season run value slightly better (0.280 against
+# 0.271), and velocity still never lowers a grade. Widths are about the sampling error of a 30-pitch average.
+SMOOTH = {"perceived_velo": 0.5, "ivb": 1.0, "hb": 1.0, "spin": 40.0, "rel_height": 0.1, "rel_side": 0.1}
+SMOOTH_DIFF = {"perceived_velo": "velo_diff", "ivb": "ivb_diff", "hb": "hb_diff"}  # the gap moves with the pitch
+SMOOTH_DRAWS = 128
+
+
+def _smooth_offsets() -> dict:
+    """The fixed cloud: SMOOTH_DRAWS offsets per feature, in mirrored pairs so each averages exactly zero."""
+    rng = np.random.default_rng(7)
+    out = {}
+    for f, sd in SMOOTH.items():
+        half = rng.normal(0, sd, SMOOTH_DRAWS // 2)
+        out[f] = np.concatenate([half, -half])
+    return out
+
+
+_OFFSETS = _smooth_offsets()
+
+
+def smooth_predict(model, X: pd.DataFrame, features: list[str]) -> np.ndarray:
+    """``model``'s prediction for each row of ``X``, averaged over the fixed cloud of nearby pitches."""
+    X = X[features].astype(float).reset_index(drop=True)
+    n = len(X)
+    big = pd.concat([X] * SMOOTH_DRAWS, ignore_index=True)
+    for f, off in _OFFSETS.items():
+        step = np.repeat(off, n)
+        if f in big:
+            big[f] = big[f] + step
+        if SMOOTH_DIFF.get(f) in big:
+            big[SMOOTH_DIFF[f]] = big[SMOOTH_DIFF[f]] + step
+    return model.predict(big).reshape(SMOOTH_DRAWS, n).mean(axis=0)
+
+
 def predict(rows: pd.DataFrame, models: dict | None = None) -> pd.DataFrame:
-    """Add predicted xRV per 100 for Stuff (``stuff_xrv``) and Shape (``shape_xrv``)."""
+    """Add predicted xRV per 100 for Stuff (``stuff_xrv``) and Shape (``shape_xrv``), smoothed (see SMOOTH)."""
     if models is None:
         from joblib import load
 
@@ -229,8 +267,8 @@ def predict(rows: pd.DataFrame, models: dict | None = None) -> pd.DataFrame:
         mask = rows["group"] == group
         ok = mask & rows[m["features"]].notna().all(axis=1)
         if ok.any():
-            rows.loc[ok, "stuff_xrv"] = m["stuff"].predict(rows.loc[ok, m["features"]])
-            rows.loc[ok, "shape_xrv"] = m["shape"].predict(rows.loc[ok, m["shape_features"]])
+            rows.loc[ok, "stuff_xrv"] = smooth_predict(m["stuff"], rows.loc[ok], m["features"])
+            rows.loc[ok, "shape_xrv"] = smooth_predict(m["shape"], rows.loc[ok], m["shape_features"])
     return rows
 
 

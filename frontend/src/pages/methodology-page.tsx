@@ -242,6 +242,7 @@ export default function MethodologyPage() {
               ["Fastball features", "perceived velo, IVB, HB, spin, release height, release side"],
               ["Secondary features", "perceived velo, IVB, HB, spin, plus velo / IVB / HB off his fastball"],
               ["Constraint", "monotonic in velocity: a harder pitch never grades worse than the same pitch thrown softer"],
+              ["Smoothing", "each grade is the average over a small cloud of nearby pitches (0.5 mph, 1 in, 40 rpm), so a pitch's averages moving by a sampling-sized amount shifts Stuff+ about 2 points instead of 3 to 4"],
               ["Validation", "5-fold cross-validation grouped by pitcher, scored on out-of-fold predictions only"],
             ]}>
             <p className="m-0">
@@ -524,8 +525,9 @@ export default function MethodologyPage() {
             <p className="m-0">
               Below these, the page shows N/A or says what's missing. Above them, location and results are still weighed by
               how much data is behind them, so grades firm up as the season goes on instead of jumping around. Stuff+ and
-              Shape+ don't need this: a pitch's shape is measured precisely on every throw, so a handful of pitches already
-              describes it well. Location+ is shown already weighed by its sample. Results+ is shown as it happened and
+              Shape+ aren't weighed this way: a pitch's shape is measured on every throw, so a few dozen pitches describe
+              it well. They still wobble by about 2 points at 30 pitches, from the sampling error in a pitch's averages.
+              Location+ is shown already weighed by its sample. Results+ is shown as it happened and
               weighed only inside Pitch+.
             </p>
           </Section>

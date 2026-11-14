@@ -65,3 +65,30 @@ def test_scaling_is_within_each_pitch_type():
     assert plus.iloc[0] > 100 > plus.iloc[1]
     assert plus.iloc[2] > 100 > plus.iloc[3]
     assert plus.iloc[0] == pytest.approx(plus.iloc[2])
+
+
+def test_smoothing_cloud_is_fixed_and_centered():
+    from prism_model import stuff
+    assert all(abs(off.mean()) < 1e-12 and len(off) == stuff.SMOOTH_DRAWS for off in stuff._OFFSETS.values())
+
+    class Linear:  # a model that is already smooth: averaging over a centered cloud must change nothing
+        def predict(self, X):
+            return (2 * X["perceived_velo"] - X["ivb"] + 0.5 * X["velo_diff"]).to_numpy()
+
+    X = pd.DataFrame({"perceived_velo": [90.0, 95.0], "ivb": [15.0, 10.0], "velo_diff": [-8.0, -10.0]})
+    feats = ["perceived_velo", "ivb", "velo_diff"]
+    assert np.allclose(stuff.smooth_predict(Linear(), X, feats), Linear().predict(X))
+    assert np.allclose(stuff.smooth_predict(Linear(), X, feats), stuff.smooth_predict(Linear(), X.iloc[::-1], feats)[::-1])
+
+
+def test_smoothing_softens_a_step():
+    from prism_model import stuff
+
+    class Step:  # a staircase like a tree split: 1 run better at 92 mph and above
+        def predict(self, X):
+            return np.where(X["perceived_velo"] >= 92, -1.0, 0.0)
+
+    X = pd.DataFrame({"perceived_velo": [91.9, 92.1, 80.0, 100.0]})
+    out = stuff.smooth_predict(Step(), X, ["perceived_velo"])
+    assert abs(out[1] - out[0]) < 0.5 and out[1] < out[0]      # a 0.2 mph nudge no longer flips a whole run
+    assert out[2] == 0.0 and out[3] == -1.0                    # far from the step nothing changes

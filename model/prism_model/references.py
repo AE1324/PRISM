@@ -239,6 +239,25 @@ def build(years: list[int] = MLB_YEARS) -> dict:
     return ref
 
 
+def refresh_stuff() -> dict:
+    """
+    Re-predict Stuff and Shape for the saved MLB pitcher-season rows and reset their scale (mean and SD by
+    pitch type), leaving everything else in the reference as built. For when the Stuff prediction changes
+    but the Statcast seasons behind the rows aren't on this machine.
+    """
+    from joblib import dump, load as jl
+
+    ref, rows = jl(REFERENCE_PATH), pd.read_parquet(ROWS_PATH)
+    rows = predict(rows.drop(columns=["stuff_xrv", "shape_xrv"]))[list(rows.columns)]
+    rows.to_parquet(ROWS_PATH, index=False)
+    scale = rows.groupby("shape_family")[["stuff_xrv", "shape_xrv"]].agg(["mean", "std"])
+    for kind, row in scale.iterrows():
+        ref["scale"].setdefault(kind, {}).update({f"{a}_{b}": float(v) for (a, b), v in row.items()})
+    dump(ref, REFERENCE_PATH)
+    _CACHE.clear()
+    return ref
+
+
 _CACHE: dict = {}
 
 
@@ -259,8 +278,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=["build"])
     parser.add_argument("--years", type=int, nargs="+", default=MLB_YEARS)
+    parser.add_argument("--refresh-stuff", action="store_true", help="only re-predict Stuff/Shape on the saved rows")
     args = parser.parse_args()
-    ref = build(args.years)
+    ref = refresh_stuff() if args.refresh_stuff else build(args.years)
     fp = ref["first_pitch"]
     print(f"\nFirst-pitch strike, middle half of MLB pitchers: {fp[0.25]:.0%}–{fp[0.75]:.0%}")
     print("Scale per pitch type (mean / SD):")

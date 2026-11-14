@@ -45,7 +45,7 @@ from prism_data.paths import DATA_DIR
 from prism_model import d3, fastball_traits, location, references, results_tiers
 from prism_model.references import RATE_COLUMNS, add_flags, num, location_score, result_values, results_score
 from prism_model.shapes import BUCKET, FB_ZONES, OPEN_TAGS
-from prism_model.stuff import GROUPS, aggregate, predict, to_plus
+from prism_model.stuff import GROUPS, aggregate, predict, to_plus, smooth_predict
 
 REPORTS_DIR = DATA_DIR / "reports"
 
@@ -339,7 +339,7 @@ def explain_stuff(rows: pd.DataFrame, ref: dict, models: dict | None) -> dict:
             avg = peers[feats].mean()
         else:
             avg = pd.Series(ref["features"].get(r["shape_family"], {}))
-        base = float(m["stuff"].predict(x)[0])
+        base = float(smooth_predict(m["stuff"], x, feats)[0])
         parts = {}
         for name, cols in COMPONENTS.items():
             cols = [c for c in cols if c in feats and c in avg and pd.notna(avg.get(c))]
@@ -347,7 +347,7 @@ def explain_stuff(rows: pd.DataFrame, ref: dict, models: dict | None) -> dict:
                 continue
             x2 = x.copy()
             x2[cols] = avg[cols].to_numpy()
-            alt = float(m["stuff"].predict(x2)[0])
+            alt = float(smooth_predict(m["stuff"], x2, feats)[0])
             mlb_pts = 10 * (alt - base) / s["stuff_xrv_std"]
             parts[name] = round(mlb_pts * 10 / r["stuff_sd"], 0)
         out[idx] = parts
