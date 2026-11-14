@@ -286,7 +286,7 @@ export default function MeasuresPage() {
             </table>
           </div>
           <ul className="m-0 mt-5 flex list-none flex-col gap-3 p-0 text-[15px] leading-relaxed text-[#B3BAC5]">
-            <li><span className="text-[#EDF0F4]">Green means on target, red means there's a gain to be had.</span> A change only becomes a target if it's worth at least 5 Stuff+, and a ride, run or spin target only stands if, among the MLB pitches most like his, the ones with that change actually allowed fewer runs. The card quotes that result.</li>
+            <li><span className="text-[#EDF0F4]">Green means on target, red means there's a gain to be had.</span> A change only becomes a target if it's worth at least 5 Stuff+ (10 for a ride or run change), and a ride, run or spin target only stands if, among the MLB pitches most like his, the ones with that change actually allowed fewer runs. The card quotes that result.</li>
             <li><span className="text-[#EDF0F4]">"No target (rare)"</span> means the trait is beyond 97% of MLB pitches of that type, so there isn't enough data to say whether more or less would help.</li>
             <li><span className="text-[#EDF0F4]">Velocity targets for secondary pitches are set off his current fastball.</span> As the fastball gets faster, the range moves up with it. PRISM never asks a pitcher to throw slower, except a changeup that sits too close to the fastball, and then only through the grip.</li>
             <li><span className="text-[#EDF0F4]">Spin axis is shown as a clock face</span> (12:00 is pure backspin, mirrored for lefties). When the research shows a direction plays better for that pitch type, the card says which way to go.</li>

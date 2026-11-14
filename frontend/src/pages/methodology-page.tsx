@@ -471,7 +471,8 @@ export default function MethodologyPage() {
               ["Evidence check", "a ride, run or spin target stands only if, among those pitches, the half with more (or less) of it actually allowed fewer runs"],
               ["Velocity", "fastball: up only, to +4 mph. Secondaries: this pitch's own speed with the fastball held fixed"],
               ["Spin", "at most ±300 rpm"],
-              ["Becomes a target", "worth 5+ Stuff+; the target is every value within 2 points of the best"],
+              ["Becomes a target", "worth 5+ Stuff+ (10+ for ride, drop, run or sweep); the target is every value within 2 points of the best"],
+              ["Why movement needs more", "on 3,525 MLB pitch types thrown in back-to-back seasons, predicted gains from velocity and spin changes showed up in results in full; gains from movement changes mostly didn't"],
               ["Secondary velo window", "2 mph, set off his current fastball (moves up as the fastball does)"],
               ["Slower", "only changeups and splitters that sit too close to the fastball, by grip, at fastball arm speed"],
             ]}>

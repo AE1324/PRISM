@@ -866,6 +866,12 @@ TRAITS = {  # trait -> (columns that move with it, step, label, unit)
 GRIP_SLOWED = ("Changeup", "Splitter")  # the only pitches where "slower" can be the right goal (via grip, not intent)
 VELO_FLAG_PCT = 25   # fastball velocity below this D3 percentile becomes a headline priority
 TARGET_GAIN = 5.0   # Stuff+ points a change has to be worth before it becomes a target (small nudges are noise)
+# Movement targets need twice that. On 3,525 MLB pitch types thrown in back-to-back seasons, graded by a model
+# that never saw the pitcher, predicted gains from velocity and spin changes showed up in results in full
+# (1.20 +/- 0.22 and 1.83 +/- 0.40 of the predicted runs), but gains from ride/drop and run/sweep changes
+# mostly didn't (0.19 +/- 0.34 and 0.07 +/- 0.36). Year-to-year movement readings drift, which makes that
+# test harsh on movement, so the bar is doubled rather than movement targets dropped.
+TARGET_GAIN_BY_TRAIT = {"ivb": 10.0, "hb": 10.0}
 TARGET_BAND = 2.0   # values within this many points of the best count as "in range"
 VELO_UP_MAX = 4.0   # don't ask for more than ~4 mph
 SPIN_MAX_CHANGE = 300.0
@@ -964,7 +970,7 @@ def pitch_targets(r: pd.Series, mlb_rows: pd.DataFrame, models: dict | None, ref
         gain = best - now_plus
         now = float(r[main] if key != "velo" else r["velo"])
         win = (now + ok.min(), now + ok.max())
-        in_range = gain < TARGET_GAIN or ok.min() <= 0 <= ok.max()
+        in_range = gain < TARGET_GAIN_BY_TRAIT.get(key, TARGET_GAIN) or ok.min() <= 0 <= ok.max()
         best_delta = float(deltas[int(np.nanargmax(g))])
         evidence = None
         if key in ("ivb", "hb", "spin") and not in_range:
