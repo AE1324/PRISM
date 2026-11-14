@@ -19,6 +19,8 @@ def test_pitch_plus_matches_garnet_sweeper_example():
 
 def test_pitch_plus_without_games_is_the_projection():
     assert pitch_plus(110, 90, None, 0) == pytest.approx(100)
+    assert pitch_plus(110, 90, None, 0, stuff_share=0.7) == pytest.approx(104)
+    assert pitch_plus(None, 90, None, 0, stuff_share=0.7) == pytest.approx(90)
     assert pitch_plus(110, None, None, 0) == pytest.approx(110)
     assert pitch_plus(None, None, 90, 30) is None
 

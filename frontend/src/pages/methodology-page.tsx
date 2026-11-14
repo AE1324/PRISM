@@ -392,7 +392,8 @@ export default function MethodologyPage() {
           <Section id="pitchplus" title="Pitch+"
             short="Pitch+ blends what a pitch is with what it has done, and lets the results take over only once there are enough of them to mean something."
             specs={[
-              ["Projection", "mean of Stuff+ and Location+"],
+              ["Projection", "fastballs: half Stuff+, half Location+ · breaking and off-speed: 70% Stuff+, 30% Location+"],
+              ["How the split was measured", "MLB pitch types thrown in both 2024 and 2025 (2,340): grade one season, predict runs in the other. Per point, Location+ was worth as much as Stuff+ on fastballs and much less on secondaries"],
               ["Results weight", "n ÷ (n + k), where n is game pitches and k depends on how the balls in play were recorded"],
               ["k", "measured 400 · charted 440 · outcomes only 1,000"],
               ["Shown when", "15+ pitches vs hitters (game or live sessions); below that the card shows Stuff+, Shape+ and Location+ without a Pitch+"],
@@ -405,6 +406,13 @@ export default function MethodologyPage() {
               [250, "38%", "20%", "about a full season"],
               [1000, "71%", "50%", "results lead"],
             ]} />
+            <p className="m-0">
+              The projection leans on Location+ less for breaking balls and off-speed pitches. With a fall-sized sample,
+              a slider's Location+ is mostly the pitcher's overall command, and in MLB a pitcher's overall command
+              predicted how his fastballs would do the next season but not his secondaries. How one pitch's locations
+              differ from his usual command did predict, and that part grows as the pitch's own sample does. This comes
+              from MLB seasons; there is no two-season D3 data with locations to repeat it on.
+            </p>
             <p className="m-0">
               Pitch+ is only shown once a pitch has some results behind it: 15 pitches against live hitters. Before that
               there's nothing for the results side to say, and a Pitch+ would just be Stuff and Location under another name.

@@ -58,6 +58,13 @@ MIN_PEERS = 4               # pitch types needed to set a 100 scale
 # depends on how much is known about the balls in play (results_tiers: measured 400, charted 440, outcome-only
 # 1000 game pitches, measured on MLB). RESULTS_K is the fallback when a pitch type has no balls in play yet.
 RESULTS_K = results_tiers.TIER_K["outcome"]
+# Stuff+'s share of the Pitch+ projection, by pitch group (the rest is Location+). Measured on MLB pitch types
+# thrown in both 2024 and 2025 (2,340 pairs): grade one season, predict runs in the other. Per grade point,
+# Stuff+ carried 44% of the weight on fastballs (90% range 36-53), 74% on offspeed (48 to over 100) and all
+# of it on breaking balls (no less than about 55). Location+ at small samples is mostly the pitcher's overall
+# command, which predicted his fastballs' results but not his secondaries'. There is no two-season D3 data
+# to repeat this on, so secondaries take a middle figure rather than the MLB point estimates.
+STUFF_SHARE = {"Fastball": 0.5, "Breaking": 0.7, "Offspeed": 0.7}
 # Location+ lives in location.py (MLB location run values, D3 center, sample-size regression).
 FADE_AFTER = 25
 MIN_GAME_FOR_VERDICT = 15
@@ -125,16 +132,16 @@ def display_name(name) -> str:
     return name
 
 
-def pitch_plus(stuff, location, results, n_game: int, k: float = RESULTS_K):
+def pitch_plus(stuff, location, results, n_game: int, k: float = RESULTS_K, stuff_share: float = 0.5):
     """
-    Garnet's Pitch+: the projection (mean of Stuff and Location) moved toward
-    Results by n / (n + k), where n is game pitches.
-    Example from the case study: Stuff 99, Location 95, Results 88, n 41 -> 90.
+    Garnet's Pitch+: the projection (Stuff and Location, blended by ``stuff_share``; whichever one there is
+    if the other is missing) moved toward Results by n / (n + k), where n is game pitches.
+    Example from the case study: Stuff 99, Location 95, Results 88, n 41, k 15 -> 90.
     """
-    parts = [v for v in (stuff, location) if v is not None and not pd.isna(v)]
-    if not parts:
+    have = [v is not None and not pd.isna(v) for v in (stuff, location)]
+    if not any(have):
         return None
-    proj = float(np.mean(parts))
+    proj = float(stuff_share * stuff + (1 - stuff_share) * location) if all(have) else float(stuff if have[0] else location)
     if results is None or pd.isna(results) or not n_game:
         return proj
     w = n_game / (n_game + k)
@@ -299,9 +306,9 @@ def grade_rows(df: pd.DataFrame, ref: dict, models: dict | None, scale: str = "d
             rows[comp], rows[f"{comp}_basis"], rows[f"{comp}_mean"], rows[f"{comp}_sd"] = r["plus"], r["basis"], r["mean"], r["sd"]
 
     rows["pitch_plus"] = [
-        pitch_plus(s, l, r, g, k) if n >= MIN_TYPE_PITCHES and g >= MIN_GAME_FOR_PITCH_PLUS else None
-        for s, l, r, g, n, k in zip(rows["stuff"], rows["location"], rows["results"], rows["n_game"], rows["n"],
-                                    rows["results_k"])
+        pitch_plus(s, l, r, g, k, STUFF_SHARE.get(grp, 0.5)) if n >= MIN_TYPE_PITCHES and g >= MIN_GAME_FOR_PITCH_PLUS else None
+        for s, l, r, g, n, k, grp in zip(rows["stuff"], rows["location"], rows["results"], rows["n_game"], rows["n"],
+                                         rows["results_k"], rows["group"] if "group" in rows else [None] * len(rows))
     ]
     rows["pitch_plus"] = rows["pitch_plus"].astype(float)
 

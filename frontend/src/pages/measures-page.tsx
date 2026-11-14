@@ -131,7 +131,7 @@ export default function MeasuresPage() {
             ))}
           </div>
           <p className="m-0 mt-5 text-[13px] leading-relaxed text-[#9AA3B1]">
-            Pitch+ starts from the average of Stuff+ and Location+. Results only take over once there's enough of a game
+            Pitch+ starts from a blend of Stuff+ and Location+ (even on fastballs, 70/30 toward Stuff+ on breaking and off-speed pitches). Results only take over once there's enough of a game
             sample to trust them, and Pitch+ isn't shown until a pitch has 15 pitches against hitters.
           </p>
         </div>
