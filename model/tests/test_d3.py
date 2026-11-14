@@ -32,3 +32,11 @@ def test_translate_scales_speed_spin_and_separation_together():
 def test_d3_rate_maps_pitch_types():
     assert d3.d3_rate("Sinker", "whiff", fake_ref()) == 0.17
     assert np.isnan(d3.d3_rate("Slider", "whiff", fake_ref()))
+
+
+def test_velo_weight_by_pitch_type():
+    ref = {"velo_weights": {"Fastball": 1.15, "Slider": 2.0, "Curveball": 1.2, "Changeup": 1.0}}
+    assert d3.velo_weight("Sinker", ref) == 1.15 and d3.velo_weight("Cutter", ref) == 1.15
+    assert d3.velo_weight("Sweeper", ref) == 2.0 and d3.velo_weight("Curveball", ref) == 1.2
+    assert d3.velo_weight("Splitter", ref) == 1.0 and d3.velo_weight("Knuckleball", ref) == 1.0
+    assert d3.velo_weight("Four-seam", fake_ref()) == 2.0  # a reference built before per-type weights

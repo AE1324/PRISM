@@ -217,8 +217,8 @@ def d3_stuff(rows: pd.DataFrame, models: dict | None, d3ref: dict | None,
     """
     Predict Stuff/Shape xRV. With a D3 reference, each pitch is graded as thrown at his MLB-equivalent
     arm speed (``d3.translate`` + ``d3.model_inputs``: velocity, spin and separation scaled together; or by
-    the given per-pitcher velocity ``shifts`` ratios), and the velocity part of fastball Stuff is weighted by
-    the D3 velocity weight. Displayed values stay as thrown.
+    the given per-pitcher velocity ``shifts`` ratios), and the velocity part of Stuff is weighted by
+    that pitch type's D3 velocity weight (``d3.velo_weight``). Displayed values stay as thrown.
     """
     if d3ref is not None:
         if shifts is None:
@@ -233,9 +233,8 @@ def d3_stuff(rows: pd.DataFrame, models: dict | None, d3ref: dict | None,
         if c in pred:
             rows[c] = pred[c].to_numpy()
     if d3ref is not None:
-        fb = rows["group"] == "Fastball"
-        w = d3ref["velo_weight"]
-        rows.loc[fb, "stuff_xrv"] = rows.loc[fb, "shape_xrv"] + w * (rows.loc[fb, "stuff_xrv"] - rows.loc[fb, "shape_xrv"])
+        w = rows["shape_family"].map(lambda k: d3.velo_weight(k, d3ref))
+        rows["stuff_xrv"] = rows["shape_xrv"] + w * (rows["stuff_xrv"] - rows["shape_xrv"])
     return rows
 
 

@@ -7,10 +7,10 @@ rate references.
    perceived velocity at the same percentile. Every pitch he throws moves by
    the same amount, so the gaps between his pitches (which the MLB model also
    uses) are unchanged.
-2. D3 velocity weight. Synergy velocity bands show whiffs per swing rising about
-   twice as fast with velocity percentile in D3 as in MLB
-   (``python -m prism_model.velo_whiff_check``). The velocity part of a
-   fastball's Stuff (Stuff minus Shape) is multiplied by this weight.
+2. D3 velocity weights. Synergy velocity bands from 14 staffs, set against Statcast, show how much more
+   one mph is worth in D3 than in MLB for each pitch type, in whiffs and in wOBA
+   (``python -m prism_model.velo_weights``). The velocity part of a pitch's Stuff (Stuff minus Shape)
+   is multiplied by its type's weight.
 3. D3 rates. Strike% and whiff-per-swing by pitch type from the Synergy team
    pulls, re-weighted so team strength matches all of D3.
 
@@ -30,7 +30,6 @@ from prism_data.paths import DATA_DIR, PROCESSED_DIR
 
 PATH = DATA_DIR / "models" / "d3_reference.joblib"
 FASTBALLS = ["Four-seam", "Sinker"]
-MAX_VELO_WEIGHT = 2.0
 MPH_PER_FT = 1.6
 MLB_AVG_EXTENSION_FT = 6.3
 
@@ -128,23 +127,31 @@ def add_location_reference() -> dict:
 
 
 def build() -> dict:
-    from prism_model.velo_whiff_check import _logit_slope, d3_curve, mlb_curve
+    from prism_model import velo_weights
 
-    m, d = mlb_curve(), d3_curve()
-    ratio = (_logit_slope(d.pct, d.whiff_per_swing, d.swings) /
-             _logit_slope(m.pct, m.whiff_per_swing, m.swings))
     scale = pd.read_csv(DATA_DIR / "models" / "d3_fb_velo_scale.csv")
     ref = {
         "d3_scale_mph": scale["mph"].to_numpy(float),
         "mlb_perceived_mph": _mlb_perceived_scale(),
-        "velo_weight_measured": float(ratio),
-        "velo_weight": float(min(max(ratio, 1.0), MAX_VELO_WEIGHT)),
         "rates": _d3_rates(),
         "location": _location_reference(),
     }
+    measured = velo_weights.measure(ref)
+    ref["velo_weights_measured"] = measured
+    ref["velo_weights"] = {k: v["used"] for k, v in measured.items()}
     PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(ref, PATH)
     return ref
+
+
+def velo_weight(kind: str, ref: dict) -> float:
+    """
+    D3 velocity weight for a PRISM pitch type (velo_weights.py). Cutters take the fastball weight, since
+    Synergy has too few to measure; anything else unmeasured counts velocity as MLB does.
+    """
+    w = ref.get("velo_weights") or {"Fastball": ref.get("velo_weight", 1.0)}
+    t = SYNERGY_TYPE.get(kind)
+    return float(w.get("Fastball" if t == "Cutter" else t, 1.0))
 
 
 def load() -> dict | None:
@@ -222,7 +229,8 @@ def main() -> None:
     ap.add_argument("cmd", choices=["build"])
     ap.parse_args()
     ref = build()
-    print(f"D3 velocity weight: measured {ref['velo_weight_measured']:.2f}, used {ref['velo_weight']:.2f}")
+    for k, v in ref["velo_weights_measured"].items():
+        print(f"D3 velocity weight, {k}: measured {v['measured']:.2f}, used {v['used']:.2f}")
     for p in (10, 50, 90):
         print(f"  D3 {p}th pct {ref['d3_scale_mph'][p - 1]:.1f} mph -> MLB perceived {ref['mlb_perceived_mph'][p - 1]:.1f}")
     for k, v in ref["rates"].items():
